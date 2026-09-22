@@ -71,7 +71,7 @@ trap 'rm -f "${SNAPSHOT_STAGED:-}" "${SNAPSHOT_PREV:-}"' EXIT
 mkdir -p "$REPO_DIR/pi" "$REPO_DIR/mcp" "$REPO_DIR/shared-skills"
 
 # --- 1. Scalar config files (explicit allowlist) --------------
-for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc; do
+for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc pi-lsp.json; do
   if [ -f "$AGENT_DIR/$f" ]; then
     cp -f "$AGENT_DIR/$f" "$REPO_DIR/pi/$f"
     log "copied pi/$f"

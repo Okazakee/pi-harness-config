@@ -10,6 +10,7 @@
 #   scripts/test-obscura-restore.sh      Obscura checksum/lock logic
 #   scripts/test-cwd-switch.sh           /cd extension unit + wiring tests
 #   scripts/test-todo.sh                 todo extension unit + wiring tests
+#   scripts/test-statusline.sh           statusline provider-usage tests
 #   scripts/test-versions.sh             live version discovery tests
 #
 # The scanner self-test runs BEFORE the history scan on purpose: a clean
@@ -44,6 +45,7 @@ run "renderer patch fixtures"    "$REPO_ROOT/scripts/test-renderer-patch.sh"
 run "obscura lock/checksum logic" "$REPO_ROOT/scripts/test-obscura-restore.sh"
 run "cwd-switch extension tests"  "$REPO_ROOT/scripts/test-cwd-switch.sh"
 run "todo extension tests"        "$REPO_ROOT/scripts/test-todo.sh"
+run "statusline usage tests"      "$REPO_ROOT/scripts/test-statusline.sh"
 run "version discovery tests"     "$REPO_ROOT/scripts/test-versions.sh"
 
 if [ "$fail" -ne 0 ]; then

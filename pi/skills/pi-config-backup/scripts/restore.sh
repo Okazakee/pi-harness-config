@@ -85,7 +85,7 @@ fi
 if [ -d "$AGENT_DIR" ] && [ -n "$(ls -A "$AGENT_DIR" 2>/dev/null)" ]; then
   backup="$AGENT_DIR/backups/restore-$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$backup"
-  for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc; do
+  for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc pi-lsp.json; do
     [ -f "$AGENT_DIR/$f" ] && cp -a "$AGENT_DIR/$f" "$backup/" 2>/dev/null
   done
   for d in agents extensions themes skills; do
@@ -97,7 +97,7 @@ fi
 mkdir -p "$AGENT_DIR" "$(dirname "$MCP_DST")" "$SHARED_SKILLS_DST"
 
 # --- 4. Restore config files ---------------------------------
-for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc; do
+for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc pi-lsp.json; do
   [ -f "$REPO_DIR/pi/$f" ] && cp -f "$REPO_DIR/pi/$f" "$AGENT_DIR/$f" && log "restored $f"
 done
 for d in agents extensions themes skills; do

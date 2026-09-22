@@ -1,0 +1,43 @@
+{
+  "biome": {
+    "command": ["biome", "lsp-proxy"],
+    "extensions": [
+      ".astro",
+      ".css",
+      ".cts",
+      ".cjs",
+      ".graphql",
+      ".gql",
+      ".html",
+      ".js",
+      ".json",
+      ".jsonc",
+      ".jsx",
+      ".mjs",
+      ".mts",
+      ".svelte",
+      ".ts",
+      ".tsx",
+      ".vue"
+    ]
+  },
+  "typescript": {
+    "command": ["typescript-language-server", "--stdio"],
+    "extensions": [".ts", ".tsx", ".mts", ".cts"],
+    "initialization": {
+      "tsserver": {
+        "path": "/home/okazakee/.local/share/pi-lsp-typescript/node_modules/typescript/lib/tsserver.js"
+      }
+    }
+  },
+  "rust-analyzer": {
+    "command": ["rust-analyzer"],
+    "extensions": [".rs"],
+    "pullDiagnosticsGraceMs": 5000
+  },
+  "clangd": {
+    "command": ["clangd", "--background-index", "--clang-tidy"],
+    "extensions": [".c", ".cpp", ".cc", ".cxx", ".c++", ".h", ".hpp", ".hh", ".hxx", ".h++"],
+    "skipDirectories": ["build"]
+  }
+}

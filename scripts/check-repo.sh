@@ -217,6 +217,7 @@ for script in \
   scripts/test-backup-restore.sh \
   scripts/test-obscura-restore.sh \
   scripts/test-renderer-patch.sh \
+  scripts/test-statusline.sh \
   scripts/test-cwd-switch.sh \
   scripts/test-todo.sh \
   scripts/test-versions.sh \
@@ -336,7 +337,7 @@ PY
   fi
 fi
 
-for json in pi/settings.json mcp/mcp.json deps/obscura.lock.json deps/tools.lock.json; do
+for json in pi/settings.json pi/pi-lsp.json mcp/mcp.json deps/obscura.lock.json deps/tools.lock.json; do
   if [ ! -f "$json" ]; then
     fail "expected JSON file is missing: $json"
   elif ! python3 -m json.tool "$json" >/dev/null 2>&1; then

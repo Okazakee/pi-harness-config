@@ -85,5 +85,8 @@ jobs:
       - name: todo extension tests
         run: ./scripts/test-todo.sh
 
+      - name: Statusline provider-usage tests
+        run: ./scripts/test-statusline.sh
+
       - name: Version discovery tests
         run: ./scripts/test-versions.sh
