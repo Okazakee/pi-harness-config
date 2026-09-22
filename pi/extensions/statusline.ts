@@ -243,15 +243,14 @@ export default function statusline(pi: ExtensionAPI) {
 		spinnerTimer = undefined;
 	};
 
-	const renderTimer = (theme: Theme): string | undefined => {
+	const renderTimer = (theme: Theme): string => {
 		if (taskStart !== undefined) {
 			const glyph = SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length];
 			return `${theme.fg("accent", glyph)} ${theme.fg("text", formatDuration(Date.now() - taskStart))}`;
 		}
-		if (lastElapsedMs !== undefined) {
-			return `${theme.fg("dim", "✓")} ${theme.fg("dim", formatDuration(lastElapsedMs))}`;
-		}
-		return undefined;
+		// Idle: keep the element visible — last task duration, or 0s before any task.
+		const glyph = lastElapsedMs !== undefined ? "✓" : "○";
+		return `${theme.fg("dim", glyph)} ${theme.fg("dim", formatDuration(lastElapsedMs ?? 0))}`;
 	};
 
 	async function refreshUsage(ctx: ExtensionContext): Promise<void> {
@@ -323,8 +322,7 @@ export default function statusline(pi: ExtensionAPI) {
 					const separator = theme.fg("dim", SEP);
 
 					const left: string[] = [];
-					const timer = renderTimer(theme);
-					if (timer) left.push(timer);
+					left.push(renderTimer(theme));
 					left.push(theme.fg("dim", ICON_PI));
 
 					if (model) {
