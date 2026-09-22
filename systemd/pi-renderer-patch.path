@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh the Pi TUI renderer patch when the managed Pi version changes
+
+[Path]
+PathChanged=%h/.pi/agent/install/current-version
+Unit=pi-renderer-patch.service
+
+[Install]
+WantedBy=default.target

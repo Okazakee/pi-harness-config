@@ -8,8 +8,10 @@
 #
 # Verifies: allowlisted scalars round-trip, dcp.jsonc and the MCP config
 # round-trip byte-identically, forbidden paths are never copied, .secrets/
-# and auth.json are never copied, and restore backs up the existing config
-# before replacing it.
+# and auth.json are never copied, restore backs up the existing config
+# before replacing it, and the live version preflight runs before the copy
+# phase, reports Pi drift, refreshes snapshot metadata, runs the local Pi
+# transition compatibility checks, and runs the repository contract afterwards.
 # ============================================================
 set -uo pipefail
 
@@ -52,7 +54,7 @@ mkdir -p "$AGENT/agents" "$AGENT/extensions" "$AGENT/themes" "$AGENT/skills/demo
          "$AGENT/sessions" "$AGENT/install" "$AGENT/npm" "$AGENT/bin" "$AGENT/git"
 
 printf '# AGENTS\n' >"$AGENT/AGENTS.md"
-printf '{\n  "theme": "fixture",\n  "packages": []\n}\n' >"$AGENT/settings.json"
+printf '{\n  "theme": "fixture",\n  "lastChangelogVersion": "0.87.2",\n  "packages": []\n}\n' >"$AGENT/settings.json"
 printf '{\n  "bindings": {}\n}\n' >"$AGENT/keybindings.json"
 printf '#!/usr/bin/env python3\nprint("fixture")\n' >"$AGENT/patch-pi-renderer.py"
 printf '\x89PNG\r\n\x1a\n fixture-logo' >"$AGENT/logo.png"
@@ -78,7 +80,30 @@ printf 'git cache marker\n' >"$AGENT/git/marker"
 # A local secret store next to the live config must never be picked up either.
 printf 'secret store fixture\n' >"$AGENT/.secrets-fixture-marker"
 
+# Version preflight fixtures: stub binaries (prepended to PATH, so the real
+# machine's tools are never used) plus the managed install marker.
+mkdir -p "$WORK/stubs"
+printf '#!/bin/sh\nprintf "%%s\\n" "0.87.2"\n' >"$WORK/stubs/pi"
+printf '#!/bin/sh\nprintf "%%s\\n" "rtk 0.49.0"\n' >"$WORK/stubs/rtk"
+printf '#!/bin/sh\nprintf "%%s\\n" "trufflehog 3.97.6"\n' >"$WORK/stubs/trufflehog"
+printf '#!/bin/sh\nprintf "%%s\\n" "obscura 0.2.3"\n' >"$WORK/stubs/obscura"
+chmod +x "$WORK"/stubs/*
+export PATH="$WORK/stubs:$PATH"
+printf '0.87.2' >"$AGENT/install/current-version"
+
 git -C "$WORK" init -q -b main "$REPO" 2>/dev/null || { mkdir -p "$REPO"; git -C "$REPO" init -q -b main; }
+
+# Pre-existing repository snapshot metadata, one Pi version behind live, plus
+# a repository-contract stub that records having run.
+mkdir -p "$REPO/pi" "$REPO/scripts"
+printf '{\n  "lastChangelogVersion": "0.87.1"\n}\n' >"$REPO/pi/settings.json"
+printf '# Fixture repository\n\n- Pi version at backup time: **0.87.1**\n' >"$REPO/README.md"
+cat >"$REPO/scripts/check-repo.sh" <<'SH'
+#!/usr/bin/env bash
+touch "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/.check-repo-ran"
+exit 0
+SH
+chmod +x "$REPO/scripts/check-repo.sh"
 
 # ---------------------------------------------------------------- 1. backup
 rc=0
@@ -89,6 +114,116 @@ else
   fail "backup.sh exited $rc"
   sed 's/^/        /' "$WORK/backup.log" >&2
 fi
+
+# ---------------------------------------------------------------- 1b. version preflight
+preflight_line="$(grep -n 'Live version preflight' "$WORK/backup.log" | head -n1 | cut -d: -f1)"
+copy_line="$(grep -n 'copied pi/settings.json' "$WORK/backup.log" | head -n1 | cut -d: -f1)"
+if [ -n "$preflight_line" ] && [ -n "$copy_line" ] && [ "$preflight_line" -lt "$copy_line" ]; then
+  pass "backup: version preflight runs before the copy phase"
+else
+  fail "backup: version preflight ordering not proven (preflight=${preflight_line:-none} copy=${copy_line:-none})"
+fi
+
+if grep -q 'Version drift detected: Pi 0.87.1 → 0.87.2' "$WORK/backup.log"; then
+  pass "backup: Pi drift is detected and reported before copying"
+else
+  fail "backup: Pi drift was not reported"
+fi
+
+if grep -q '0.87.2' "$REPO/README.md"; then
+  pass "backup: README snapshot metadata refreshed to live Pi"
+else
+  fail "backup: README snapshot metadata was not refreshed"
+fi
+
+if [ -f "$REPO/.check-repo-ran" ]; then
+  pass "backup: repository contract ran after the copy phase"
+else
+  fail "backup: repository contract did not run after copying"
+fi
+
+if grep -q 'Pi version transition: running local compatibility checks' "$WORK/backup.log"; then
+  pass "backup: Pi transition triggers local compatibility checks"
+else
+  fail "backup: Pi transition checks did not run"
+fi
+
+if [ -f "$REPO/pi/versions.json" ]; then
+  pass "backup: version snapshot created after the first successful backup"
+else
+  fail "backup: version snapshot missing after a successful backup"
+fi
+if python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("schemaVersion")==1 and d.get("pi")=="0.87.2" else 1)' "$REPO/pi/versions.json" 2>/dev/null; then
+  pass "backup: version snapshot records the live Pi version"
+else
+  fail "backup: version snapshot content is wrong"
+fi
+if grep -q 'version snapshot updated: pi/versions.json' "$WORK/backup.log"; then
+  pass "backup: snapshot commit is reported after verification"
+else
+  fail "backup: snapshot commit was not reported"
+fi
+if ls "$REPO"/.versions.json.staged.* "$REPO"/.versions.json.prev.* >/dev/null 2>&1; then
+  fail "backup: staging leftovers remain after a successful run"
+else
+  pass "backup: no staging leftovers after a successful run"
+fi
+
+# A second successful run replaces the snapshot and must leave no rollback
+# temps behind (this is the success path that owns a previous snapshot).
+snapshot_first="$(sha256sum "$REPO/pi/versions.json" | awk '{print $1}')"
+rc=0
+bash "$BACKUP_SH" >"$WORK/backup-second.log" 2>&1 || rc=$?
+snapshot_second="$(sha256sum "$REPO/pi/versions.json" | awk '{print $1}')"
+if [ "$rc" -eq 0 ]; then
+  pass "backup: second unchanged run exits 0 (stable fixed point)"
+else
+  fail "backup: second unchanged run exited $rc"
+fi
+if [ "$snapshot_first" = "$snapshot_second" ]; then
+  pass "backup: second unchanged run leaves the snapshot content identical"
+else
+  fail "backup: second unchanged run changed the snapshot content"
+fi
+if ls "$REPO"/.versions.json.staged.* "$REPO"/.versions.json.prev.* >/dev/null 2>&1; then
+  fail "backup: staging leftovers remain after a second successful run"
+else
+  pass "backup: no staging leftovers after a second successful run"
+fi
+
+# ---------------------------------------------------------------- 1c. transactional snapshot
+snapshot_before="$(sha256sum "$REPO/pi/versions.json" | awk '{print $1}')"
+cat >"$REPO/scripts/check-repo.sh" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+chmod +x "$REPO/scripts/check-repo.sh"
+rc=0
+bash "$BACKUP_SH" >"$WORK/backup-fail.log" 2>&1 || rc=$?
+snapshot_after="$(sha256sum "$REPO/pi/versions.json" | awk '{print $1}')"
+if [ "$rc" -ne 0 ]; then
+  pass "backup: failing post-copy verification exits non-zero"
+else
+  fail "backup: verification failure did not fail the backup"
+fi
+if [ "$snapshot_before" = "$snapshot_after" ]; then
+  pass "backup: failed verification leaves the version snapshot unchanged"
+else
+  fail "backup: failed verification advanced the version snapshot"
+fi
+if ls "$REPO"/.versions.json.staged.* "$REPO"/.versions.json.prev.* >/dev/null 2>&1; then
+  fail "backup: staging leftovers remain after a failed run"
+else
+  pass "backup: no staging leftovers after a failed run"
+fi
+
+# Restore the contract stub for the remaining checks.
+cat >"$REPO/scripts/check-repo.sh" <<'SH'
+#!/usr/bin/env bash
+touch "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/.check-repo-ran"
+exit 0
+SH
+chmod +x "$REPO/scripts/check-repo.sh"
 
 # ---------------------------------------------------------------- 2. allowlisted round-trip
 for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc; do

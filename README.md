@@ -7,7 +7,7 @@ the parts needed to rebuild the harness on a fresh machine. This is
 This repository is the single source of truth for the Pi harness now that the
 former `omp-harness-config` repo is retired.
 
-- Pi version at backup time: **0.87.0**
+- Pi version at backup time: **0.87.1**
 - Full source-path mapping: [`docs/provenance.md`](docs/provenance.md)
 
 ## Repository layout
@@ -34,6 +34,7 @@ pi-harness-config/
 │   ├── obscura.lock.json       # exact Obscura release, asset name and SHA-256
 │   └── tools.lock.json         # pinned TruffleHog version + per-platform SHA-256
 ├── scripts/                    # repository tooling: checks, tests, installers
+├── systemd/                    # user path unit: re-apply the renderer patch after updates
 ├── .githooks/                  # tracked pre-commit / pre-push hooks
 ├── .github/workflows/          # independent CI verification
 ├── .secrets/                   # LOCAL secret store — gitignored, never committed
@@ -97,6 +98,70 @@ Limits worth knowing: tools registered by other extensions (lsp, subagent, mcp)
 are not rewritten, and the git branch in the footer still reflects the session
 directory. Tests: `scripts/test-cwd-switch.sh`.
 
+## Execution scoping (`/todo`)
+
+[`pi/extensions/todo.ts`](pi/extensions/todo.ts) adds a bounded execution
+working set for long, multi-step work. It is deliberately not another
+scheduler — the layers stay separate:
+
+```text
+AGENTS.md    durable engineering policy
+plan mode    approach and exploration
+pi-goal      high-level persistent objective
+todo         bounded execution working set (phases + one active task)
+subagent     delegated specialist work
+```
+
+The model creates and advances the board through a `todo` tool (`init`,
+`start`, `done`, `drop`, `block`, `unblock`, `append`, `rm`, `clear`, `view`).
+Short, specific task labels are the stable identity; exactly one task is
+`in_progress` at a time and the next pending task is promoted automatically,
+while blocked tasks never promote until unblocked. The tool guidance asks the
+model to use the board for work with three or more genuinely distinct steps
+and to keep every item of an explicit user checklist as its own task.
+
+Manual control:
+
+```text
+/todo                              show the full board
+/todo help                         list the command surface
+/todo append [phase] <task>        add a task
+/todo start <task>                 make one task active
+/todo done <task|phase>            complete a task or every open task in a phase
+/todo drop <task|phase>            abandon work
+/todo block <task|phase> [reason]  mark work blocked
+/todo unblock <task|phase>         return blocked work to pending
+/todo rm <task|phase>              remove a task or phase
+/todo clear                        clear the board
+```
+
+Command targets accept case-insensitive exact matches or a unique substring;
+ambiguous matches are rejected. While a board is open, a compact
+`<todo_context>` pointer (progress, active phase, active task, next task,
+open/blocked counts) is injected into every model request — it is
+request-local and never appended to the transcript — and a small widget above
+the editor shows the same pointer.
+
+For prompts that locally look multi-step (an action checklist, three or more
+distinct engineering actions, checklist wording, or a long execution brief),
+the extension injects **one** request-local `<todo_nudge>` on the first model
+request of that turn, encouraging the model to initialize or reconcile the
+board. It is a deterministic local heuristic — no model call, no forced tool
+call — and the reminder is never persisted into session history. Prompts that
+read as explanation requests are biased against nudging unless they also
+carry clear task structure.
+
+State belongs to the **Pi session**, not to the filesystem: model tool results
+and manual `/todo` snapshots reconstruct the board from the active session
+branch, so it follows branch navigation, survives resume, and is unaffected by
+`/cd`. There is no `TODO.md`, no `todo.json`, and no state file; nothing
+todo-related is backed up because it is runtime session data. Delegated
+`pi-subagent` children intentionally register no todo tool, command, context
+injection, or widget — the board belongs to the parent/director session only.
+DCP keeps `todo` results protected, so their model-facing text stays small.
+
+Tests: `scripts/test-todo.sh`.
+
 ## What is backed up (allowlist)
 
 `~/.pi/agent`: `AGENTS.md`, `settings.json`, `dcp.jsonc`,
@@ -147,12 +212,54 @@ bash ~/.pi/agent/skills/pi-config-backup/scripts/restore.sh
 `restore.sh` restores the config, then best-effort reinstalls the pieces that
 are **not** config: Pi packages (`pi update --extensions`), the `obscura` MCP
 binary (the exact release pinned in `deps/obscura.lock.json`, verified by
-SHA-256 before extraction), and the TUI renderer patch. It backs up any
+SHA-256 before extraction), and the TUI renderer patch (plus its `systemd
+--user` update guard). It backs up any
 existing live config first, never touches `auth.json`, and activates the
 tracked Git hooks when it is restoring into a real Git checkout.
 
 - Flags: `--yes` (no prompt), `--no-packages`, `--no-obscura`, `--no-patch`.
 - Still manual: install Pi itself, then run `pi login` to store credentials.
+
+### Version preflight (backup only)
+
+Every backup starts by discovering the live versions/revisions of the harness
+— Pi (runtime plus the managed `install/current-version` marker, which must
+agree), RTK, every declared Pi package (`npm:` versions, `git:` commit pins),
+DCP's pinned commit, Obscura (installed vs `deps/obscura.lock.json`),
+TruffleHog (installed vs `deps/tools.lock.json`), Bun and Node. Discovery is
+local and offline: it reads local binaries, settings, lock files and git
+checkouts, never the network.
+
+The repository is compared against that inventory **before any file is
+copied**. Version drift is reported explicitly (`Pi 0.87.1 → 0.87.2`) and
+current snapshot metadata is refreshed — the README backup-time line in place,
+`pi/settings.json` through the normal copy. Drift alone never fails a backup.
+Blocking inconsistencies abort before the repository is touched: runtime Pi
+version vs the managed marker, installed TruffleHog vs the pinned version,
+installed Obscura vs the lock, a floating DCP pin, malformed lock metadata, or
+an undiscoverable required component. A final post-copy pass verifies that the
+snapshot describes the live Pi version and runs the repository contract.
+
+When Pi itself has changed since the previous snapshot, backup also runs the
+existing lightweight transition checks against the current install before
+copying: the renderer patcher's non-mutating `--check` signature proof,
+headless extension loading (including the repo's todo extension when it is not
+yet restored live), and the `cwd-switch`/`todo` suites when Bun is available.
+
+The preflight also compares the live inventory with `pi/versions.json`, the
+snapshot of the last **successful** backup. Unpinned component changes (RTK,
+Pi npm extensions, git sources, Bun/Node) are reported as `~ old → new`,
+`+ added`, or `- removed` but never block — they are history, not
+requirements. The snapshot is replaced only after the copy and every
+verification step succeeds, so a failed backup never advances it; the first
+coherent backup reports a baseline instead of fake drift. Hard locks and pins
+(`deps/*.lock.json`, the DCP commit) remain the only things that block, and
+`pi/versions.json` is never used to install anything.
+
+Backup never checks upstream for newer releases and never upgrades any
+dependency. It records what the machine actually has; intentional live changes
+are detected and snapshotted, upstream updates alone change nothing. Tests:
+`scripts/test-versions.sh`, `scripts/test-backup-restore.sh`.
 
 ## Reproducibility (pinned dependencies)
 
@@ -193,6 +300,32 @@ all four supported assets to expose SHA-256 digest metadata, refuses draft or
 prerelease builds unless `--include-prerelease` is passed, and fails on a
 missing asset or an ambiguous duplicate. The resulting lock diff is a normal
 repository change: review it and commit it deliberately.
+
+## TUI renderer patch
+
+Pi's bundled renderer hardcodes a literal fence line above and below every code
+block and scrolls one line per mouse-wheel event (kitty's system default is 5).
+[`pi/patch-pi-renderer.py`](pi/patch-pi-renderer.py) removes the fence lines
+and raises the wheel scroll to 5 lines. It locates the bundle chunk and the
+`pi-tui` markdown module **by signature** — Pi renames hashed chunk files on
+every release — is idempotent, and fails loudly when a pattern is unprovable
+instead of silently skipping.
+
+A Pi update replaces the release directory, so the patch must be re-applied.
+`scripts/install-renderer-guard.sh` installs and enables a `systemd --user`
+path unit (`systemd/pi-renderer-patch.{path,service}`) that watches
+`~/.pi/agent/install/current-version` and re-runs the patch script whenever the
+managed version changes:
+
+```bash
+scripts/install-renderer-guard.sh              # install + enable
+scripts/install-renderer-guard.sh --uninstall  # remove
+```
+
+`restore.sh` applies the patch and installs the guard as part of its
+best-effort post-restore steps (skippable with `--no-patch`). On machines
+without a systemd user manager (for example macOS), run
+`python3 ~/.pi/agent/patch-pi-renderer.py` after each update instead.
 
 ## Repository integrity: hooks, checks and CI
 

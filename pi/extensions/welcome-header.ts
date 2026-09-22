@@ -1,7 +1,7 @@
 /**
  * Custom startup header, styled after oh-my-pi's welcome banner.
  *
- *   ╭─── pi v0.87.0 ─────────────────────── FREEDOM // PRIVACY ───╮
+ *   ╭─── pi v0.87.1 ─────────────────────── FREEDOM // PRIVACY ───╮
  *   │        Welcome back!        │ Tips                           │
  *   │           <logo>            │ #  prompt actions              │
  *   │      DeepSeek V4.1 Flash    │ ...                            │

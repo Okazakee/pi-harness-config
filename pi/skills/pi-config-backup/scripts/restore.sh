@@ -7,7 +7,8 @@
 #   1. Pi packages from settings.json      (pi update --extensions)
 #   2. the obscura MCP binary              (deps/obscura.lock.json:
 #                                           exact release + asset + SHA-256)
-#   3. the TUI renderer patch              (patch-pi-renderer.py)
+#   3. the TUI renderer patch + guard      (patch-pi-renderer.py;
+#                                           systemd --user path unit)
 #
 # A checksum mismatch, an unusable Obscura lock, or an unsupported
 # platform is an INTEGRITY failure: restore reports it loudly and exits
@@ -34,6 +35,12 @@ if [ -f "$SCRIPT_DIR/obscura-lib.sh" ]; then
   . "$SCRIPT_DIR/obscura-lib.sh" && HAVE_OBSCURA_LIB=1
 fi
 
+# Shared live version discovery (single source of truth for Pi detection).
+if [ -f "$SCRIPT_DIR/versions-lib.sh" ]; then
+  # shellcheck source=versions-lib.sh disable=SC1091
+  . "$SCRIPT_DIR/versions-lib.sh"
+fi
+
 INTEGRITY_FAILURES=0
 
 ASSUME_YES=0 DO_PACKAGES=1 DO_OBSCURA=1 DO_PATCH=1
@@ -57,7 +64,11 @@ fail() { printf 'restore: ERROR: %s\n' "$*" >&2; exit 1; }
 # --- 1. Preflight: is Pi itself installed? -------------------
 PI_BIN="$(command -v pi || true)"
 if [ -n "$PI_BIN" ]; then
-  log "found pi: $PI_BIN ($(pi --version 2>/dev/null | head -1))"
+  if command -v versions_pi_runtime_version >/dev/null 2>&1; then
+    log "found pi: $PI_BIN ($(versions_pi_runtime_version))"
+  else
+    log "found pi: $PI_BIN ($(pi --version 2>/dev/null | head -1))"
+  fi
 else
   warn "pi is not on PATH — install Pi first, then re-run. Config will still be restored."
 fi
@@ -167,10 +178,15 @@ if [ "$DO_OBSCURA" = 1 ]; then
   fi
 fi
 
-# --- 7. TUI renderer patch (best effort) ---------------------
+# --- 7. TUI renderer patch + update guard (best effort) ------
 if [ "$DO_PATCH" = 1 ] && [ -f "$AGENT_DIR/patch-pi-renderer.py" ]; then
   log "applying TUI renderer patch…"
   python3 "$AGENT_DIR/patch-pi-renderer.py" || warn "renderer patch failed — run it manually after install/update"
+  if [ -x "$REPO_DIR/scripts/install-renderer-guard.sh" ]; then
+    log "installing the renderer update guard…"
+    "$REPO_DIR/scripts/install-renderer-guard.sh" \
+      || warn "guard install failed — run scripts/install-renderer-guard.sh manually"
+  fi
 fi
 
 # --- 8. Auth reminder ----------------------------------------

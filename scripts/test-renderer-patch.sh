@@ -9,8 +9,8 @@
 # the test exercises the transformation semantics rather than duplicating
 # (and drifting from) the patterns.
 #
-# Cases: unpatched, already patched, upstream changed, missing target,
-# ambiguous chunk.
+# Cases: unpatched, already patched, check-only, upstream changed, missing
+# target, ambiguous chunk.
 # ============================================================
 set -uo pipefail
 
@@ -69,6 +69,7 @@ def write_tree(name, chunk_text, tui_text, *, chunk_name="chunk-TEST0001.js",
 
 
 write_tree("unpatched", unpatched_chunk, unpatched_tui)
+write_tree("checkable", unpatched_chunk, unpatched_tui)
 write_tree("changed", changed_chunk, changed_tui)
 write_tree("missing", unpatched_chunk, "", include_tui=False)
 write_tree(
@@ -142,6 +143,45 @@ if grep -q 'already' "$WORK/out.txt"; then
   pass "already-patched fixture: reports 'already' rather than re-patching"
 else
   fail "already-patched fixture: did not report 'already'"
+fi
+
+# ---------------------------------------------------------------- 2b. check mode (no writes)
+CHECK_CHUNK="$WORK/checkable/$CHUNK_REL/chunk-TEST0001.js"
+CHECK_TUI="$WORK/checkable/$TUI_REL/markdown.js"
+before="$(sha256sum "$CHECK_CHUNK" "$CHECK_TUI")"
+rc=0
+PI_CODING_AGENT_DIR="$WORK/checkable" python3 "$PATCHER" --check >"$WORK/out.txt" 2>"$WORK/err.txt" || rc=$?
+after="$(sha256sum "$CHECK_CHUNK" "$CHECK_TUI")"
+if [ "$rc" -eq 0 ]; then
+  pass "check mode on an unpatched install: exits 0 (signatures provable)"
+else
+  fail "check mode on an unpatched install: expected exit 0, got $rc"
+fi
+if [ "$before" = "$after" ]; then
+  pass "check mode: writes nothing"
+else
+  fail "check mode modified files"
+fi
+if grep -qi 'patchable' "$WORK/out.txt"; then
+  pass "check mode: reports patchable signatures"
+else
+  fail "check mode: did not report patchable signatures"
+fi
+
+rc=0
+PI_CODING_AGENT_DIR="$WORK/unpatched" python3 "$PATCHER" --check >"$WORK/out.txt" 2>"$WORK/err.txt" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'already' "$WORK/out.txt"; then
+  pass "check mode on a patched install: exits 0 (already patched)"
+else
+  fail "check mode on a patched install: expected exit 0 with 'already'"
+fi
+
+rc=0
+PI_CODING_AGENT_DIR="$WORK/changed" python3 "$PATCHER" --check >"$WORK/out.txt" 2>"$WORK/err.txt" || rc=$?
+if [ "$rc" -ne 0 ]; then
+  pass "check mode on an upstream-changed install: exits non-zero"
+else
+  fail "check mode on an upstream-changed install: expected non-zero"
 fi
 
 # ---------------------------------------------------------------- 3. upstream changed
