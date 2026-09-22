@@ -28,6 +28,9 @@ const SHOW_THINKING_LEVEL = true;
 /** How often provider usage is refetched. */
 const USAGE_REFRESH_MS = 60_000;
 const USAGE_TIMEOUT_MS = 10_000;
+/** Task-timer spinner frames (braille) and frame interval. */
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SPINNER_MS = 100;
 
 const OPENCODE_GO = "opencode-go";
 const OPENCODE_GO_BASE = "https://opencode.ai/zen/go";
@@ -134,6 +137,17 @@ function formatReset(resetsAt: string, unit: "m" | "h"): string | undefined {
 	return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
 }
 
+/** Elapsed task time, e.g. "42s", "3m 07s", "1h 02m". */
+export function formatDuration(ms: number): string {
+	const total = Math.max(0, Math.floor(ms / 1000));
+	const hours = Math.floor(total / 3600);
+	const minutes = Math.floor((total % 3600) / 60);
+	const seconds = total % 60;
+	if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+	if (minutes > 0) return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+	return `${seconds}s`;
+}
+
 function pickUsageColor(percent: number): ThemeColor {
 	if (percent >= 80) return "error";
 	if (percent >= 50) return "warning";
@@ -208,6 +222,38 @@ export default function statusline(pi: ExtensionAPI) {
 	let fetching = false;
 	let requestRender: (() => void) | undefined;
 
+	// Task timer — rendered as the first element of the bar.
+	let taskStart: number | undefined;
+	let lastElapsedMs: number | undefined;
+	let spinnerFrame = 0;
+	let spinnerTimer: ReturnType<typeof setInterval> | undefined;
+
+	const startSpinner = () => {
+		if (spinnerTimer) return;
+		spinnerTimer = setInterval(() => {
+			spinnerFrame++;
+			requestRender?.();
+		}, SPINNER_MS);
+		spinnerTimer.unref?.();
+	};
+
+	const stopSpinner = () => {
+		if (!spinnerTimer) return;
+		clearInterval(spinnerTimer);
+		spinnerTimer = undefined;
+	};
+
+	const renderTimer = (theme: Theme): string | undefined => {
+		if (taskStart !== undefined) {
+			const glyph = SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length];
+			return `${theme.fg("accent", glyph)} ${theme.fg("text", formatDuration(Date.now() - taskStart))}`;
+		}
+		if (lastElapsedMs !== undefined) {
+			return `${theme.fg("dim", "✓")} ${theme.fg("dim", formatDuration(lastElapsedMs))}`;
+		}
+		return undefined;
+	};
+
 	async function refreshUsage(ctx: ExtensionContext): Promise<void> {
 		const provider = ctx.model?.provider;
 		if (provider !== OPENCODE_GO) {
@@ -235,6 +281,23 @@ export default function statusline(pi: ExtensionAPI) {
 		}
 	}
 
+	pi.on("agent_start", () => {
+		if (taskStart === undefined) {
+			taskStart = Date.now();
+			lastElapsedMs = undefined;
+			spinnerFrame = 0;
+		}
+		startSpinner();
+		requestRender?.();
+	});
+
+	pi.on("agent_settled", () => {
+		if (taskStart !== undefined) lastElapsedMs = Date.now() - taskStart;
+		taskStart = undefined;
+		stopSpinner();
+		requestRender?.();
+	});
+
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.mode !== "tui") return;
 
@@ -248,6 +311,7 @@ export default function statusline(pi: ExtensionAPI) {
 			return {
 				dispose() {
 					clearInterval(timer);
+					stopSpinner();
 					unsubscribeBranch();
 					requestRender = undefined;
 				},
@@ -259,6 +323,8 @@ export default function statusline(pi: ExtensionAPI) {
 					const separator = theme.fg("dim", SEP);
 
 					const left: string[] = [];
+					const timer = renderTimer(theme);
+					if (timer) left.push(timer);
 					left.push(theme.fg("dim", ICON_PI));
 
 					if (model) {

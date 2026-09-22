@@ -15,6 +15,9 @@
  *   - No free tier (your auth has opencode-go + openai-codex only).
  *   - No automatic revert to the preferred model; switch back with `/model`
  *     or `/model-fallback reset`. This avoids flapping on a flaky provider.
+ *   - Usage-aware reserve: before each turn the active opencode-go usage is
+ *     preflighted (cached) and, inside `USAGE_RESERVE_PCT` remaining, fails
+ *     over preemptively instead of waiting for a 429.
  *
  * Edit CHAIN to change the order. `pickNext` is exported for testing.
  */
@@ -44,6 +47,17 @@ const COOLDOWN_MS = 10 * 60 * 1000
 /** Signatures of rate-limit / quota / provider-capacity failures. */
 const LIMIT_RE =
   /\b(429|402|529)\b|rate.?limit|too many requests|quota|usage limit|limit (?:reached|exceeded)|overloaded|capacity|unavailable/i
+
+// ── Usage-aware reserve ─────────────────────────────────────────────────
+const OPENCODE_GO = "opencode-go"
+const OPENCODE_GO_BASE = "https://opencode.ai/zen/go"
+/** Fail over when the provider's remaining usage drops to this percent. */
+const USAGE_RESERVE_PCT = 10
+/** "auto" switches silently; "confirm" asks in the TUI (subagents auto-switch). */
+const USAGE_POLICY: "auto" | "confirm" | "off" = "auto"
+/** Usage preflight cache lifetime. */
+const USAGE_CACHE_MS = 60_000
+const USAGE_TIMEOUT_MS = 8_000
 
 export function parseRef(ref: string): { provider: string; model: string } | null {
   const i = ref.indexOf("/")
@@ -84,8 +98,47 @@ function assistantErrorText(message: unknown): string | null {
   return m.errorMessage ?? ""
 }
 
+export function normalizeBaseUrl(baseUrl?: string): string {
+  const base = (baseUrl ?? "").trim().replace(/\/+$/, "").replace(/\/v1$/i, "")
+  return base || OPENCODE_GO_BASE
+}
+
+/** Used percent from the provider's rolling/weekly/monthly windows. */
+export function windowPercents(payload: unknown): number[] {
+  if (!payload || typeof payload !== "object") return []
+  const usage = (payload as { usage?: unknown }).usage
+  if (!usage || typeof usage !== "object") return []
+  const out: number[] = []
+  for (const key of ["rolling", "weekly", "monthly"] as const) {
+    const w = (usage as Record<string, unknown>)[key]
+    if (!w || typeof w !== "object") continue
+    const p = (w as { percent?: unknown }).percent
+    if (typeof p === "number" && Number.isFinite(p)) out.push(p)
+  }
+  return out
+}
+
+/** Lowest remaining % across the provider's usage windows, or undefined. */
+async function fetchRemainingPercent(ctx: ExtensionContext): Promise<number | undefined> {
+  const model = ctx.model
+  if (!model || model.provider !== OPENCODE_GO) return undefined
+  const auth = await ctx.modelRegistry.getProviderAuth(OPENCODE_GO)
+  const apiKey = auth?.auth?.apiKey
+  if (!apiKey) return undefined
+  const url = `${normalizeBaseUrl(auth?.auth?.baseUrl ?? model.baseUrl)}/v1/usage`
+  const response = await fetch(url, {
+    headers: { accept: "application/json", authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(USAGE_TIMEOUT_MS),
+  })
+  if (!response.ok) return undefined
+  const percents = windowPercents(await response.json())
+  if (percents.length === 0) return undefined
+  return 100 - Math.max(...percents)
+}
+
 export default function modelFallback(pi: ExtensionAPI) {
   const suppressed = new Map<string, number>()
+  let usageCache: { at: number; remaining: number | undefined } | undefined
 
   const currentRef = (ctx: ExtensionContext): string | undefined => {
     const m = ctx.model
@@ -129,6 +182,21 @@ export default function modelFallback(pi: ExtensionAPI) {
     )
   }
 
+  /** Cached lowest remaining % for the opencode-go provider, or undefined. */
+  async function reserved(ctx: ExtensionContext): Promise<number | undefined> {
+    if (ctx.model?.provider !== OPENCODE_GO) return undefined
+    const now = Date.now()
+    if (usageCache && now - usageCache.at < USAGE_CACHE_MS) return usageCache.remaining
+    let remaining: number | undefined
+    try {
+      remaining = await fetchRemainingPercent(ctx)
+    } catch {
+      remaining = undefined
+    }
+    usageCache = { at: now, remaining }
+    return remaining
+  }
+
   // Reactive: the assistant message finalized with a limit/overload error.
   pi.on("message_end", async (event, ctx) => {
     const errorText = assistantErrorText(event.message)
@@ -138,12 +206,30 @@ export default function modelFallback(pi: ExtensionAPI) {
     }
   })
 
-  // Proactive: current model is in cooldown when a new turn starts.
+  // Proactive: cooldown skip, then usage-reserve preflight.
   pi.on("before_agent_start", async (_event, ctx) => {
     const current = currentRef(ctx)
     if (current && isSuppressed(suppressed, current, Date.now())) {
       await failover(ctx, "provider in cooldown")
+      return
     }
+    if (USAGE_POLICY === "off") return
+    const remaining = await reserved(ctx)
+    if (remaining === undefined || remaining > USAGE_RESERVE_PCT) return
+    const label = `${remaining.toFixed(0)}% left`
+    if (USAGE_POLICY === "confirm" && ctx.mode === "tui") {
+      let proceed = true
+      try {
+        proceed = await ctx.ui.confirm(
+          "Provider reserve reached",
+          `${ctx.model?.name ?? "Current model"} has ${label}. Switch to a fallback model?`,
+        )
+      } catch {
+        proceed = true
+      }
+      if (!proceed) return
+    }
+    await failover(ctx, `usage reserve (${label})`)
   })
 
   pi.registerCommand("model-fallback", {
