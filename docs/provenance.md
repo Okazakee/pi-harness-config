@@ -7,6 +7,7 @@ not listed here are intentionally excluded.
 | --- | --- |
 | `pi/AGENTS.md` | `~/.pi/agent/AGENTS.md` |
 | `pi/settings.json` | `~/.pi/agent/settings.json` |
+| `pi/dcp.jsonc` | `~/.pi/agent/dcp.jsonc` |
 | `pi/keybindings.json` | `~/.pi/agent/keybindings.json` |
 | `pi/patch-pi-renderer.py` | `~/.pi/agent/patch-pi-renderer.py` |
 | `pi/logo.png` | `~/.pi/agent/logo.png` |
@@ -34,6 +35,9 @@ not listed here are intentionally excluded.
 
 ## Notes
 
+- `pi/dcp.jsonc` is declarative global DCP (Dynamic Context Pruning) policy —
+  a human-edited config file, not runtime state. DCP itself performs only
+  request-local pruning and never persists context edits.
 - `.secrets/` (repo root) is a local, gitignored secret store: **filename** =
   secret name, **content** = value. It is intentionally absent from git and
   from the backup; agents read values from it without printing them.

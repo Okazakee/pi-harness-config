@@ -19,6 +19,7 @@ pi-harness-config/
 ├── pi/                         # curated snapshot of ~/.pi/agent
 │   ├── AGENTS.md               # global agent policy
 │   ├── settings.json           # Pi settings (theme, models, TUI, packages)
+│   ├── dcp.jsonc               # global DCP policy (conservative context pruning)
 │   ├── keybindings.json
 │   ├── patch-pi-renderer.py    # re-apply TUI renderer patches after updates
 │   ├── logo.png
@@ -40,12 +41,30 @@ If the machine or Pi is reinstalled, this repository rebuilds the harness:
 global policy, settings, custom subagents, extensions, themes, skills, and MCP
 server definitions. Credentials and runtime state are deliberately absent.
 
+## Context management (RTK + DCP + native compaction)
+
+Three independent layers reduce context cost; none replaces another:
+
+- **RTK** rewrites shell commands and shrinks tool output *before* it enters
+  session history.
+- **DCP** (`pi-dcp`) prunes stale, redundant, and oversized *historical tool
+  payloads* only in the request-local context sent to the model. It never
+  mutates the canonical Pi session history.
+- **Pi native compaction** stays enabled and remains the semantic long-term
+  history mechanism.
+
+DCP is configured conservatively in [`pi/dcp.jsonc`](pi/dcp.jsonc) — the
+package is pinned to an exact commit (not floating `main`), recent turns and
+autonomous steps are protected, `subagent` results are permanently protected,
+and the riskier strategies (`supersedeWrites`, experimental `distillTool`,
+`compressTool`, `llmAutonomy`) stay disabled.
+
 ## What is backed up (allowlist)
 
-`~/.pi/agent`: `AGENTS.md`, `settings.json`, `keybindings.json`,
-`patch-pi-renderer.py`, `logo.png`, and the `agents/`, `extensions/`,
-`themes/`, `skills/` directories. Plus `~/.config/mcp/mcp.json` and
-`~/.agents/skills/`.
+`~/.pi/agent`: `AGENTS.md`, `settings.json`, `dcp.jsonc`,
+`keybindings.json`, `patch-pi-renderer.py`, `logo.png`, and the `agents/`,
+`extensions/`, `themes/`, `skills/` directories. Plus `~/.config/mcp/mcp.json`
+and `~/.agents/skills/`.
 
 ## What is never backed up
 

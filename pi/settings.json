@@ -22,6 +22,7 @@
     "npm:@narumitw/pi-btw",
     "npm:@narumitw/pi-goal",
     "npm:pi-mcp-adapter",
-    "https://github.com/ayghri/i-have-adhd"
+    "https://github.com/ayghri/i-have-adhd",
+    "git:github.com/PSU3D0/pi-dcp@8d15a3331c51f3551ccd20583ac0f5ba499a13c3"
   ]
 }

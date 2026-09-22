@@ -30,7 +30,7 @@ esac
 mkdir -p "$REPO_DIR/pi" "$REPO_DIR/mcp" "$REPO_DIR/shared-skills"
 
 # --- 1. Scalar config files (explicit allowlist) --------------
-for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png; do
+for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc; do
   if [ -f "$AGENT_DIR/$f" ]; then
     cp -f "$AGENT_DIR/$f" "$REPO_DIR/pi/$f"
     log "copied pi/$f"

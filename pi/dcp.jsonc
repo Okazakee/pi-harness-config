@@ -1,0 +1,88 @@
+{
+  "enabled": true,
+
+  // Currently mostly descriptive upstream, but explicitly document
+  // the intended conservative policy.
+  "mode": "safe",
+
+  "debug": false,
+
+  // Keep the full default recent conversational window.
+  // Do not sacrifice recent user intent merely for token savings.
+  "turnProtection": {
+    "enabled": true,
+    "turns": 8
+  },
+
+  // Upstream defaults to only 2 execution steps.
+  // Preserve considerably more of a long autonomous coding run.
+  "stepProtection": {
+    "enabled": true,
+    "steps": 5
+  },
+
+  // Leave upstream pressure thresholds unchanged.
+  // Do not attempt to coordinate these with Pi native compaction.
+  "thresholds": {
+    "nudge": 0.7,
+    "autoPrune": 0.8,
+    "forceCompact": 0.9
+  },
+
+  // Keep all coordination-oriented tools protected.
+  // In particular, subagent reports must remain available even when old.
+  "protectedTools": [
+    "todo",
+    "subagent",
+    "send_to_session",
+    "plan_enter",
+    "plan_exit"
+  ],
+
+  // Preserve planning/progress material and global/project agent policy.
+  "protectedFilePatterns": [
+    "**/AGENTS.md",
+    "**/CHANGELOG.md",
+    "**/*.plan.md",
+    "**/progress.md"
+  ],
+
+  "strategies": {
+    // Keep latest same-command evidence and prune only older invocations
+    // once they are outside the protection windows.
+    "deduplicate": {
+      "enabled": true
+    },
+
+    // Intentionally conservative.
+    // Do not prune failures produced during the same autonomous user turn.
+    "purgeErrors": {
+      "enabled": true,
+      "minTurnAge": 3
+    },
+
+    // Upstream uses 1200 chars.
+    // Raise this substantially so modest outputs remain verbatim.
+    "outputBodyReplace": {
+      "enabled": true,
+      "minChars": 3000
+    },
+
+    // More aggressive and unnecessary for the first rollout.
+    "supersedeWrites": {
+      "enabled": false
+    }
+  },
+
+  // These are dormant/experimental upstream.
+  // They must remain disabled.
+  "advanced": {
+    "distillTool": {
+      "enabled": false
+    },
+    "compressTool": {
+      "enabled": false
+    },
+    "llmAutonomy": false
+  }
+}
