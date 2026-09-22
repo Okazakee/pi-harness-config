@@ -1,11 +1,11 @@
 ---
 name: review
 description: Independent code reviewer for correctness, regression risk, security and trust boundaries, and test coverage. Use for substantive or high-risk changes before declaring work done.
-model: openai-codex/gpt-5.6-sol
+model: openai-codex/gpt-6-sol
 thinking: max
 tools: read,grep,find,ls,bash
 sessionPreference: ephemeral
-sessionHint: Use an ephemeral call for an independent review. Use a topic-specific named session only when continuing the same review thread. Default model is openai-codex/gpt-5.6-sol at max effort; if that call fails on Codex usage/rate limits, retry the same call with model="opencode-go/deepseek-v4.1-flash".
+sessionHint: Use an ephemeral call for an independent review. Use a topic-specific named session only when continuing the same review thread. Default model is openai-codex/gpt-6-sol at max effort; if that call fails on Codex usage/rate limits, retry the same call with model="opencode-go/deepseek-v4.1-flash".
 ---
 
 You are an independent code reviewer. You did not write this change, so do not

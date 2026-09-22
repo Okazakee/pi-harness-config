@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# ============================================================
+# pre-push — stronger local gate. Validators only: never edits files.
+#
+#   scripts/check-repo.sh                repository invariants
+#   scripts/check-secret-scanner.sh      prove the scanner still detects
+#   scripts/check-secrets.sh --history   full Git history secret scan
+#   scripts/test-backup-restore.sh       isolated backup/restore round-trip
+#   scripts/test-renderer-patch.sh       isolated renderer patch fixtures
+#   scripts/test-obscura-restore.sh      Obscura checksum/lock logic
+#   scripts/test-cwd-switch.sh           /cd extension unit + wiring tests
+#
+# The scanner self-test runs BEFORE the history scan on purpose: a clean
+# result from a scanner that no longer detects anything means nothing.
+#
+# Hooks can be bypassed with --no-verify; CI is the authority.
+# ============================================================
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  printf 'pre-push: not inside a Git working tree\n' >&2
+  exit 1
+}
+
+fail=0
+
+run() {
+  local label="$1"
+  shift
+  printf '\n=== pre-push: %s ===\n' "$label"
+  if ! "$@"; then
+    printf 'pre-push: FAILED — %s\n' "$label" >&2
+    fail=1
+  fi
+}
+
+run "repository contract"        "$REPO_ROOT/scripts/check-repo.sh"
+run "secret scanner self-test"   "$REPO_ROOT/scripts/check-secret-scanner.sh"
+run "secret scan (full history)" "$REPO_ROOT/scripts/check-secrets.sh" --history
+run "backup/restore round-trip"  "$REPO_ROOT/scripts/test-backup-restore.sh"
+run "renderer patch fixtures"    "$REPO_ROOT/scripts/test-renderer-patch.sh"
+run "obscura lock/checksum logic" "$REPO_ROOT/scripts/test-obscura-restore.sh"
+run "cwd-switch extension tests"  "$REPO_ROOT/scripts/test-cwd-switch.sh"
+
+if [ "$fail" -ne 0 ]; then
+  printf '\npre-push: one or more checks failed — push blocked\n' >&2
+  exit 1
+fi
+
+printf '\npre-push: all checks passed\n'

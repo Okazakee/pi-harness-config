@@ -1,0 +1,22 @@
+{
+  "repository": "h4ckf0r0day/obscura",
+  "version": "v0.2.3",
+  "assets": {
+    "linux-x86_64": {
+      "name": "obscura-x86_64-linux.tar.gz",
+      "sha256": "1534d1e6ddaf3d080ec4091eb41d0a4d8cc042a48b607d3c410fc13b482a9eec"
+    },
+    "linux-aarch64": {
+      "name": "obscura-aarch64-linux.tar.gz",
+      "sha256": "5ecf980bca3060236a7a86ec7ed83d943e6598ee87caa46d20325d90bc75f979"
+    },
+    "macos-aarch64": {
+      "name": "obscura-aarch64-macos.tar.gz",
+      "sha256": "45653cfad226f1c9b415603a2ed59477fcbd6335c742338ce133c05de0bdd056"
+    },
+    "macos-x86_64": {
+      "name": "obscura-x86_64-macos.tar.gz",
+      "sha256": "d7c48122debc2ad9b24842df44560860dba765ea928b3f636b7f053225245116"
+    }
+  }
+}

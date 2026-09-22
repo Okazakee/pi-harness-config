@@ -25,8 +25,15 @@
 import type {
   ExtensionAPI,
   ExtensionContext,
-  ThinkingLevel,
 } from "@earendil-works/pi-coding-agent"
+
+/**
+ * Pi does not export its thinking-level union from the package root: it lives in
+ * `pi-ai` and `pi-agent-core`, and the two definitions disagree (`pi-ai` omits
+ * "off"). Derive it from the API that actually consumes it instead, so the type
+ * cannot drift from the installed Pi version and no extra dependency is needed.
+ */
+type ThinkingLevel = Parameters<ExtensionAPI["setThinkingLevel"]>[0]
 
 interface Candidate {
   ref: string // "provider/model"
@@ -36,7 +43,7 @@ interface Candidate {
 /** Ordered fallback candidates. The active model is skipped when present. */
 const CHAIN: Candidate[] = [
   { ref: "opencode-go/deepseek-v4.1-flash" },
-  { ref: "openai-codex/gpt-5.6-sol", thinking: "high" },
+  { ref: "openai-codex/gpt-6-sol", thinking: "high" },
   { ref: "opencode-go/deepseek-v4-flash" },
   { ref: "openai-codex/gpt-5.6-terra", thinking: "high" },
 ]

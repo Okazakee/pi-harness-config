@@ -338,6 +338,12 @@ export default function statusline(pi: ExtensionAPI) {
 
 					left.push(theme.fg("text", formatCwd(ctx.cwd)));
 
+					// cwd-switch keeps an effective directory for tool calls while the
+					// session directory stays put; show it so the footer never implies
+					// that tools are running in the directory it displays first.
+					const effectiveCwd = footerData.getExtensionStatuses?.().get("cwd");
+					if (effectiveCwd) left.push(theme.fg("accent", effectiveCwd));
+
 					const branch = footerData.getGitBranch();
 					if (branch && branch !== "detached") left.push(theme.fg("dim", branch));
 

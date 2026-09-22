@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# ============================================================
+# pre-commit — fast developer feedback. Validators only: never edits files.
+#
+# Deliberately cheap: no network, no downloads, no history scan, no
+# integration tests. Those live in pre-push and in CI.
+#
+#   scripts/check-repo.sh            repository invariants (offline, fast)
+#   scripts/check-secrets.sh --staged  scan exactly the staged blobs
+#
+# Hooks can be bypassed with --no-verify; CI is the authority.
+# ============================================================
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  printf 'pre-commit: not inside a Git working tree\n' >&2
+  exit 1
+}
+
+fail=0
+
+if ! "$REPO_ROOT/scripts/check-repo.sh"; then
+  printf 'pre-commit: repository contract failed — commit blocked\n' >&2
+  fail=1
+fi
+
+if ! "$REPO_ROOT/scripts/check-secrets.sh" --staged; then
+  printf 'pre-commit: staged secret scan failed — commit blocked\n' >&2
+  fail=1
+fi
+
+exit "$fail"

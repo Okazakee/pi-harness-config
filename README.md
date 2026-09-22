@@ -24,12 +24,18 @@ pi-harness-config/
 │   ├── patch-pi-renderer.py    # re-apply TUI renderer patches after updates
 │   ├── logo.png
 │   ├── agents/                 # subagent definitions (explore, review, ...)
-│   ├── extensions/             # rtk, statusline, welcome-header, markdown-tweaks
+│   ├── extensions/             # rtk, statusline, cwd-switch, welcome-header, markdown-tweaks
 │   ├── themes/                 # okazakee.json
 │   └── skills/                 # global Pi skills (incl. pi-config-backup)
 ├── mcp/
 │   └── mcp.json                # MCP servers Pi reads (~/.config/mcp/mcp.json)
 ├── shared-skills/              # ~/.agents/skills (skills Pi loads globally)
+├── deps/                       # pinned dependency declarations (locks)
+│   ├── obscura.lock.json       # exact Obscura release, asset name and SHA-256
+│   └── tools.lock.json         # pinned TruffleHog version + per-platform SHA-256
+├── scripts/                    # repository tooling: checks, tests, installers
+├── .githooks/                  # tracked pre-commit / pre-push hooks
+├── .github/workflows/          # independent CI verification
 ├── .secrets/                   # LOCAL secret store — gitignored, never committed
 └── docs/
     └── provenance.md           # live source path of every backed-up file
@@ -58,6 +64,38 @@ package is pinned to an exact commit (not floating `main`), recent turns and
 autonomous steps are protected, `subagent` results are permanently protected,
 and the riskier strategies (`supersedeWrites`, experimental `distillTool`,
 `compressTool`, `llmAutonomy`) stay disabled.
+
+## Effective working directory (`/cd`)
+
+Pi fixes the session working directory at process start and exposes no setter
+for it, and `!cd …` in the shell cannot persist either — every shell command
+runs in its own `bash -c` process. [`pi/extensions/cwd-switch.ts`](pi/extensions/cwd-switch.ts)
+therefore adds an **effective** directory alongside the session one:
+
+```text
+/cd <path>    set it (~, relative paths, and - for the previous one)
+/cd           show the effective and session directory
+/cd reset     drop the override
+```
+
+While an override is active, tool inputs are rewritten:
+
+- `bash` commands get a `cd <dir> || exit 1` line. It is a separate line rather
+  than an `&&` join, so multi-line scripts and heredocs still run entirely
+  inside the directory, and a failed `cd` aborts instead of silently running in
+  the wrong place.
+- `read` / `write` / `edit` resolve a relative `path` against the effective
+  directory.
+- `grep` / `find` / `ls` resolve `path`, or default their scope to it.
+- Absolute paths are never touched.
+
+The session directory itself does not change, so the footer would otherwise
+show the wrong directory. `statusline.ts` renders the effective directory as an
+extra segment whenever an override is active.
+
+Limits worth knowing: tools registered by other extensions (lsp, subagent, mcp)
+are not rewritten, and the git branch in the footer still reflects the session
+directory. Tests: `scripts/test-cwd-switch.sh`.
 
 ## What is backed up (allowlist)
 
@@ -108,8 +146,119 @@ bash ~/.pi/agent/skills/pi-config-backup/scripts/restore.sh
 
 `restore.sh` restores the config, then best-effort reinstalls the pieces that
 are **not** config: Pi packages (`pi update --extensions`), the `obscura` MCP
-binary (latest GitHub release for the detected platform), and the TUI renderer
-patch. It backs up any existing live config first, and never touches `auth.json`.
+binary (the exact release pinned in `deps/obscura.lock.json`, verified by
+SHA-256 before extraction), and the TUI renderer patch. It backs up any
+existing live config first, never touches `auth.json`, and activates the
+tracked Git hooks when it is restoring into a real Git checkout.
 
 - Flags: `--yes` (no prompt), `--no-packages`, `--no-obscura`, `--no-patch`.
 - Still manual: install Pi itself, then run `pi login` to store credentials.
+
+## Reproducibility (pinned dependencies)
+
+Obscura is **version pinned, asset pinned, and SHA-256 verified before
+extraction**. There are no floating `releases/latest` executable downloads
+anywhere in the restore path.
+
+`deps/obscura.lock.json` is the authoritative declaration:
+
+```text
+repository + version (vX.Y.Z) + asset name + sha256, per supported platform
+(linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64)
+```
+
+`restore.sh` detects the platform, reads the matching lock entry, downloads
+`releases/download/<VERSION>/<ASSET>`, hashes it locally, and only then
+extracts and installs. A checksum mismatch, an unusable lock, or an
+unsupported platform prints an explicit `ERROR`, installs nothing, and makes
+`restore.sh` exit non-zero. There is no fallback to `latest`, to an
+unverified asset, or to a build from `main`.
+
+If an existing `obscura` binary reports a different version than the lock, the
+locked release is reinstalled. The installed executable is never hashed
+against the archive digest — those are different artifacts.
+
+### Updating Obscura
+
+Updating the pin is an explicit, reviewed operation. It never runs during
+restore, backup, commit, push or CI:
+
+```bash
+python3 scripts/update-obscura-lock.py --check    # report only
+python3 scripts/update-obscura-lock.py --write    # rewrite the lock
+```
+
+The tool reads structured GitHub release metadata (no HTML scraping), requires
+all four supported assets to expose SHA-256 digest metadata, refuses draft or
+prerelease builds unless `--include-prerelease` is passed, and fails on a
+missing asset or an ambiguous duplicate. The resulting lock diff is a normal
+repository change: review it and commit it deliberately.
+
+## Repository integrity: hooks, checks and CI
+
+Three layers, none of which replaces another:
+
+```text
+pre-commit   fast developer feedback   repository invariants + staged secret scan
+pre-push     stronger local gate       scanner self-test + full history scan + integration tests
+GitHub CI    independent authority     the same checks in a clean environment
+```
+
+Hooks are tracked in `.githooks/` and are not active until you point Git at
+them:
+
+```bash
+scripts/install-hooks.sh          # sets core.hooksPath=.githooks (local config only)
+```
+
+`restore.sh` applies the same local configuration automatically when it
+restores into a directory containing `.git/`, and skips it (without failing)
+for a plain snapshot.
+
+Hooks are **feedback, not authority**: they can be bypassed with `--no-verify`.
+`.github/workflows/verify.yml` is the independent layer and runs the same
+checks on a clean runner, with every action pinned to an exact commit SHA.
+CI also installs the exact TruffleHog version pinned in `deps/tools.lock.json`
+and verifies its checksum before use.
+
+Individual checks can be run directly:
+
+```bash
+scripts/check-repo.sh              # deterministic, offline repository contract
+scripts/check-secret-scanner.sh    # prove the scanner still detects a canary
+scripts/check-secrets.sh --staged  # scan exactly the staged blobs
+scripts/check-secrets.sh --history # scan the full Git history
+scripts/test-backup-restore.sh     # isolated backup/restore round-trip
+scripts/test-renderer-patch.sh     # isolated renderer-patch fixtures
+scripts/test-obscura-restore.sh    # Obscura lock + checksum logic
+scripts/test-cwd-switch.sh         # /cd extension unit + wiring tests
+```
+
+Branch protection is **not** configured by this repository. You may later
+require the `verify` workflow to pass before merging into `main` in the GitHub
+repository settings; that is a deliberate, manual decision.
+
+## Secret scanning
+
+`.gitignore` and the backup allowlist are the primary structural defenses.
+Secret scanning is an additional, independent layer, not a replacement:
+
+- `scripts/check-secrets.sh --staged` scans exactly the blobs about to be
+  committed, copied into an isolated temporary tree. Untracked files,
+  `.secrets/`, and the live working tree are never scanned. It runs with
+  `--no-verification`, so it has no network dependency and stays fast enough
+  for every commit.
+- `scripts/check-secrets.sh --history` scans every commit in the repository
+  (with credential verification enabled).
+- `scripts/check-secret-scanner.sh` proves the scanner still detects a
+  credential canary generated at runtime. A clean scan from a scanner that
+  silently stopped detecting means nothing, so this runs before the history
+  scan in both pre-push and CI.
+
+Findings are printed with a field allowlist; **raw secret values are never
+printed**. The scanner version is pinned in `deps/tools.lock.json`; a missing
+or mismatched scanner is a hard failure, never a silent skip. Install it with
+`scripts/install-trufflehog.sh`.
+
+A scanner cannot prove the complete absence of secrets. Treat a clean result
+as one signal among several, and keep the structural defenses narrow.

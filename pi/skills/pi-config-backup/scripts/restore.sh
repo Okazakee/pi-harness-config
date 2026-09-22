@@ -5,8 +5,13 @@
 # Restores the declarative config, then best-effort reinstalls the
 # non-config pieces a fresh machine needs:
 #   1. Pi packages from settings.json      (pi update --extensions)
-#   2. the obscura MCP binary              (GitHub release)
+#   2. the obscura MCP binary              (deps/obscura.lock.json:
+#                                           exact release + asset + SHA-256)
 #   3. the TUI renderer patch              (patch-pi-renderer.py)
+#
+# A checksum mismatch, an unusable Obscura lock, or an unsupported
+# platform is an INTEGRITY failure: restore reports it loudly and exits
+# non-zero. Network and extraction failures stay best-effort.
 #
 # Never touches secrets: auth.json is not backed up and is never
 # written. The local .secrets/ store is not touched either.
@@ -19,8 +24,17 @@ REPO_DIR="${PI_BACKUP_REPO:-$HOME/Desktop/Projects/pi-harness-config}"
 AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 MCP_DST="$HOME/.config/mcp/mcp.json"
 SHARED_SKILLS_DST="$HOME/.agents/skills"
-BIN_DST="$HOME/.local/bin"
-OBSCURA_REPO="h4ckf0r0day/obscura"
+BIN_DST="${PI_BIN_DIR:-$HOME/.local/bin}"
+OBSCURA_LOCK="$REPO_DIR/deps/obscura.lock.json"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+HAVE_OBSCURA_LIB=0
+if [ -f "$SCRIPT_DIR/obscura-lib.sh" ]; then
+  # shellcheck source=obscura-lib.sh
+  . "$SCRIPT_DIR/obscura-lib.sh" && HAVE_OBSCURA_LIB=1
+fi
+
+INTEGRITY_FAILURES=0
 
 ASSUME_YES=0 DO_PACKAGES=1 DO_OBSCURA=1 DO_PATCH=1
 for arg in "$@"; do
@@ -98,36 +112,57 @@ if [ "$DO_PACKAGES" = 1 ] && [ -n "$PI_BIN" ]; then
   fi
 fi
 
-# --- 6. obscura MCP binary (best effort) ---------------------
+# --- 6. obscura MCP binary (lock-pinned, checksum-verified) --
+# deps/obscura.lock.json is the single source of truth: exact release,
+# exact asset name and exact SHA-256. The archive is never extracted
+# before its digest matches, and "latest" is never used.
 if [ "$DO_OBSCURA" = 1 ]; then
-  if command -v obscura >/dev/null 2>&1; then
-    log "obscura already present: $(command -v obscura)"
+  if [ "$HAVE_OBSCURA_LIB" != 1 ]; then
+    warn "obscura-lib.sh missing next to restore.sh — cannot verify an obscura install (integrity failure)"
+    INTEGRITY_FAILURES=$((INTEGRITY_FAILURES + 1))
   else
-    case "$(uname -s)" in Linux) os=linux ;; Darwin) os=macos ;; *) os="" ;; esac
-    case "$(uname -m)" in
-      x86_64|amd64) arch=x86_64 ;;
-      aarch64|arm64) arch=aarch64 ;;
-      *) arch="" ;;
-    esac
-    if [ -n "$os" ] && [ -n "$arch" ]; then
-      asset="obscura-${arch}-${os}.tar.gz"
-      url="https://github.com/${OBSCURA_REPO}/releases/latest/download/${asset}"
-      tmp="$(mktemp -d)"
-      log "installing obscura from $url"
-      if curl -fsSL "$url" -o "$tmp/$asset" && tar xzf "$tmp/$asset" -C "$tmp"; then
-        mkdir -p "$BIN_DST"
-        for b in obscura obscura-worker; do
-          if [ -f "$tmp/$b" ]; then
-            install -m 755 "$tmp/$b" "$BIN_DST/$b"
-            log "installed $BIN_DST/$b"
-          fi
-        done
-      else
-        warn "obscura download/extract failed — install manually: https://github.com/${OBSCURA_REPO}/releases"
-      fi
-      rm -rf "$tmp"
+    platform="$(obscura_platform_key || true)"
+    if [ -z "$platform" ]; then
+      warn "unsupported platform for obscura ($(uname -s)/$(uname -m)) — the lock covers linux/macos on x86_64/aarch64 (integrity failure)"
+      INTEGRITY_FAILURES=$((INTEGRITY_FAILURES + 1))
     else
-      warn "unsupported platform for obscura ($(uname -s)/$(uname -m)) — install manually"
+      entry="$(obscura_lock_entry "$OBSCURA_LOCK" "$platform")"
+      entry_rc=$?
+      if [ "$entry_rc" -ne 0 ]; then
+        warn "cannot resolve the obscura lock for $platform: $(obscura_failure_label "$entry_rc") (integrity failure)"
+        INTEGRITY_FAILURES=$((INTEGRITY_FAILURES + 1))
+      else
+        OBSCURA_REPO="${entry%%$'\t'*}"
+        rest="${entry#*$'\t'}"
+        OBSCURA_VERSION="${rest%%$'\t'*}"
+        rest="${rest#*$'\t'}"
+        OBSCURA_ASSET="${rest%%$'\t'*}"
+        OBSCURA_SHA="${rest##*$'\t'}"
+        locked_version="${OBSCURA_VERSION#v}"
+
+        installed_version="$(obscura_installed_version || true)"
+        if [ "$installed_version" = "$locked_version" ]; then
+          log "obscura $installed_version matches the locked $OBSCURA_VERSION"
+        else
+          if [ -n "$installed_version" ]; then
+            warn "obscura $installed_version differs from the locked $OBSCURA_VERSION — reinstalling the locked release"
+          fi
+          url="$(obscura_download_url "$OBSCURA_REPO" "$OBSCURA_VERSION" "$OBSCURA_ASSET")"
+          log "installing obscura $OBSCURA_VERSION (sha256 ${OBSCURA_SHA:0:12}…) from $url"
+          obscura_install_from_url "$url" "$OBSCURA_SHA" "$OBSCURA_ASSET" "$BIN_DST"
+          install_rc=$?
+          if [ "$install_rc" -ne 0 ]; then
+            warn "obscura install failed: $(obscura_failure_label "$install_rc")"
+            if obscura_is_integrity_failure "$install_rc"; then
+              INTEGRITY_FAILURES=$((INTEGRITY_FAILURES + 1))
+            else
+              warn "install manually: https://github.com/${OBSCURA_REPO}/releases"
+            fi
+          else
+            log "installed $BIN_DST/obscura (SHA-256 verified against the lock)"
+          fi
+        fi
+      fi
     fi
   fi
 fi
@@ -143,11 +178,43 @@ if [ ! -s "$AGENT_DIR/auth.json" ]; then
   warn "no auth.json — authenticate before use:  pi login   (providers: opencode-go, openai-codex)"
 fi
 
+# --- 9. Activate the tracked git hooks (best effort) ---------
+# Git does not activate repository hooks just because .githooks/ exists.
+# Only a real Git checkout can carry local config; a plain snapshot
+# restore must not fail because of this.
+if [ -d "$REPO_DIR/.git" ] && [ -d "$REPO_DIR/.githooks" ]; then
+  if git -C "$REPO_DIR" config --local core.hooksPath .githooks 2>/dev/null; then
+    log "activated repository hooks: core.hooksPath=$(git -C "$REPO_DIR" config --local --get core.hooksPath)"
+  else
+    warn "could not set core.hooksPath in $REPO_DIR — run scripts/install-hooks.sh manually"
+  fi
+else
+  log "hooks not activated (no .git/ and .githooks/ under $REPO_DIR)"
+fi
+
+# --- 10. Integrity summary -----------------------------------
+if [ "$INTEGRITY_FAILURES" -ne 0 ]; then
+  cat >&2 <<EOF
+
+restore: ============================================================
+restore: ERROR: $INTEGRITY_FAILURES obscura integrity failure(s).
+restore: ERROR: The locked obscura release was NOT installed and no
+restore: ERROR: unverified binary was extracted or installed.
+restore: ERROR: Fix deps/obscura.lock.json (or the download source) and
+restore: ERROR: re-run. Config restoration above is unaffected.
+restore: ============================================================
+EOF
+  exit 1
+fi
+
 cat <<'EOF'
 restore: done.
 
 Notes:
   - Secrets are never restored (auth.json is not backed up): run `pi login`.
   - Local secret store: <repo>/.secrets/ (gitignored; filename = secret name).
+  - obscura comes from deps/obscura.lock.json (exact release + SHA-256).
+    Update it deliberately with scripts/update-obscura-lock.py.
+  - Repository hooks were activated via core.hooksPath where possible.
   - Skip steps with --no-packages / --no-obscura / --no-patch.
 EOF
