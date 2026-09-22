@@ -81,3 +81,9 @@ jobs:
 
       - name: cwd-switch extension tests
         run: ./scripts/test-cwd-switch.sh
+
+      - name: todo extension tests
+        run: ./scripts/test-todo.sh
+
+      - name: Version discovery tests
+        run: ./scripts/test-versions.sh

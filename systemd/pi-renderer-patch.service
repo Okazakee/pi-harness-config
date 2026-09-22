@@ -1,0 +1,8 @@
+[Unit]
+Description=Re-apply the Pi TUI renderer patch (code fences, wheel scroll)
+
+[Service]
+Type=oneshot
+# Invoke python3 explicitly: restore.sh copies the patcher with cp, which can
+# leave it non-executable when overwriting an existing file.
+ExecStart=/usr/bin/env python3 %h/.pi/agent/patch-pi-renderer.py

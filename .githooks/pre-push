@@ -9,6 +9,8 @@
 #   scripts/test-renderer-patch.sh       isolated renderer patch fixtures
 #   scripts/test-obscura-restore.sh      Obscura checksum/lock logic
 #   scripts/test-cwd-switch.sh           /cd extension unit + wiring tests
+#   scripts/test-todo.sh                 todo extension unit + wiring tests
+#   scripts/test-versions.sh             live version discovery tests
 #
 # The scanner self-test runs BEFORE the history scan on purpose: a clean
 # result from a scanner that no longer detects anything means nothing.
@@ -41,6 +43,8 @@ run "backup/restore round-trip"  "$REPO_ROOT/scripts/test-backup-restore.sh"
 run "renderer patch fixtures"    "$REPO_ROOT/scripts/test-renderer-patch.sh"
 run "obscura lock/checksum logic" "$REPO_ROOT/scripts/test-obscura-restore.sh"
 run "cwd-switch extension tests"  "$REPO_ROOT/scripts/test-cwd-switch.sh"
+run "todo extension tests"        "$REPO_ROOT/scripts/test-todo.sh"
+run "version discovery tests"     "$REPO_ROOT/scripts/test-versions.sh"
 
 if [ "$fail" -ne 0 ]; then
   printf '\npre-push: one or more checks failed — push blocked\n' >&2

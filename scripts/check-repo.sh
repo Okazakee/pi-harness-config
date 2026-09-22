@@ -208,6 +208,7 @@ for script in \
   pi/skills/pi-config-backup/scripts/backup.sh \
   pi/skills/pi-config-backup/scripts/restore.sh \
   pi/skills/pi-config-backup/scripts/obscura-lib.sh \
+  pi/skills/pi-config-backup/scripts/versions-lib.sh \
   scripts/check-repo.sh \
   scripts/check-secrets.sh \
   scripts/check-secret-scanner.sh \
@@ -217,6 +218,9 @@ for script in \
   scripts/test-obscura-restore.sh \
   scripts/test-renderer-patch.sh \
   scripts/test-cwd-switch.sh \
+  scripts/test-todo.sh \
+  scripts/test-versions.sh \
+  scripts/install-renderer-guard.sh \
   .githooks/pre-commit \
   .githooks/pre-push ; do
   if [ ! -f "$script" ]; then
@@ -228,6 +232,109 @@ for script in \
   fi
 done
 [ "$FAILURES" -eq 0 ] && ok "shell syntax clean and scripts executable"
+
+# The renderer update guard: a systemd --user path unit that re-applies the
+# TUI patch whenever the managed Pi version changes. Static checks only; CI
+# has no user systemd manager.
+GUARD_SERVICE="systemd/pi-renderer-patch.service"
+GUARD_PATH="systemd/pi-renderer-patch.path"
+if [ ! -f "$GUARD_SERVICE" ] || [ ! -f "$GUARD_PATH" ]; then
+  fail "renderer update guard units are missing under systemd/"
+elif ! grep -q '^ExecStart=/usr/bin/env python3 %h/\.pi/agent/patch-pi-renderer\.py$' "$GUARD_SERVICE"; then
+  fail "$GUARD_SERVICE does not run patch-pi-renderer.py via python3"
+elif ! grep -q '^PathChanged=%h/\.pi/agent/install/current-version$' "$GUARD_PATH"; then
+  fail "$GUARD_PATH does not watch the managed Pi version file"
+elif ! grep -q '^Unit=pi-renderer-patch\.service$' "$GUARD_PATH"; then
+  fail "$GUARD_PATH does not reference pi-renderer-patch.service"
+else
+  ok "renderer update guard units are consistent"
+fi
+
+# The backup entrypoint must discover live versions before copying anything.
+# This is a static wiring check; live comparisons belong to backup time
+# (scripts/test-versions.sh covers the discovery logic offline).
+BACKUP_ENTRY="pi/skills/pi-config-backup/scripts/backup.sh"
+if [ ! -f "$BACKUP_ENTRY" ]; then
+  fail "backup entrypoint is missing: $BACKUP_ENTRY"
+elif ! grep -q 'versions-lib.sh' "$BACKUP_ENTRY"; then
+  fail "$BACKUP_ENTRY does not source the version discovery helper"
+elif ! grep -q 'versions_preflight' "$BACKUP_ENTRY"; then
+  fail "$BACKUP_ENTRY does not run the live version preflight"
+else
+  ok "backup entrypoint runs the live version preflight"
+fi
+
+# Snapshot Pi metadata must be internally consistent in the repository.
+# Live discovery happens at backup time; CI can only verify the snapshot.
+if [ -f pi/settings.json ] && [ -f README.md ]; then
+  settings_v="$(python3 -c 'import json;print(json.load(open("pi/settings.json")).get("lastChangelogVersion",""))' 2>/dev/null || true)"
+  readme_v="$(sed -nE 's/^- Pi version at backup time: \*\*([0-9]+\.[0-9]+\.[0-9]+)\*\*.*/\1/p' README.md | head -n1)"
+  if [ -z "$settings_v" ]; then
+    fail "pi/settings.json has no lastChangelogVersion"
+  elif [ -z "$readme_v" ]; then
+    fail "README.md has no Pi version backup-time line"
+  elif [ "$settings_v" != "$readme_v" ]; then
+    fail "snapshot Pi metadata disagrees: settings=$settings_v README=$readme_v"
+  else
+    ok "Pi snapshot metadata consistent ($settings_v)"
+  fi
+fi
+
+# The version snapshot is the machine-readable inventory from the last
+# successful backup. Validate its shape only; live comparison happens at
+# backup time, never in CI.
+SNAPSHOT_FILE="pi/versions.json"
+if [ ! -f "$SNAPSHOT_FILE" ]; then
+  fail "$SNAPSHOT_FILE is missing — run a successful backup to bootstrap the version inventory"
+else
+  snapshot_report="$(python3 - "$SNAPSHOT_FILE" <<'PY'
+import json
+import re
+import sys
+
+path = sys.argv[1]
+problems = []
+try:
+    data = json.load(open(path, encoding="utf-8"))
+except Exception as exc:  # noqa: BLE001
+    print(f"invalid JSON: {exc}")
+    sys.exit(0)
+
+if not isinstance(data, dict):
+    print("top level must be an object")
+    sys.exit(0)
+if data.get("schemaVersion") != 1:
+    problems.append("schemaVersion must be 1")
+pi = data.get("pi")
+if not isinstance(pi, str) or not re.fullmatch(r"\d+\.\d+\.\d+", pi):
+    problems.append(f"pi must be a semver string, got {pi!r}")
+for section in ("tools", "packages", "git", "runtime"):
+    value = data.get(section)
+    if not isinstance(value, dict):
+        problems.append(f"{section} must be an object")
+        continue
+    for name, entry in value.items():
+        if section == "git":
+            if not isinstance(entry, str) or not re.fullmatch(r"[0-9a-f]{40}", entry):
+                problems.append(f"git.{name} must be a full 40-hex SHA")
+        elif not isinstance(entry, str) or not re.fullmatch(r"\d+\.\d+\.\d+", entry):
+            problems.append(f"{section}.{name} must be a semver string")
+
+text = open(path, encoding="utf-8").read()
+if re.search(r"(sk-[A-Za-z0-9]{16,}|gho_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|BEGIN [A-Z ]*PRIVATE KEY)", text):
+    problems.append("looks like secret material")
+
+for problem in problems:
+    print(problem)
+PY
+)"
+  if [ -n "$snapshot_report" ]; then
+    fail "$SNAPSHOT_FILE is invalid:"
+    printf '%s\n' "$snapshot_report" | sed 's/^/          /' >&2
+  else
+    ok "version snapshot is valid (schema 1)"
+  fi
+fi
 
 for json in pi/settings.json mcp/mcp.json deps/obscura.lock.json deps/tools.lock.json; do
   if [ ! -f "$json" ]; then

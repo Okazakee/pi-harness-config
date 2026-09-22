@@ -22,6 +22,7 @@ releases, so it is discovered by signature instead of hardcoded: exactly
 one chunk may carry a renderer-patch signature. Zero or several is an error.
 
 Usage:  python3 ~/.pi/agent/patch-pi-renderer.py
+        python3 ~/.pi/agent/patch-pi-renderer.py --check   # verify only, no writes
         PI_CODING_AGENT_DIR=/tmp/fake python3 patch-pi-renderer.py
 """
 from __future__ import annotations
@@ -105,11 +106,17 @@ BUNDLE_SIGNATURES = tuple(
 
 PATCHED = "patched"
 ALREADY = "already"
+PATCHABLE = "patchable"
 FAILED = "failed"
 
 
-def apply_patch(path: pathlib.Path, patch: Patch) -> tuple[str, str]:
-    """Apply one required transformation. Returns (status, detail)."""
+def apply_patch(path: pathlib.Path, patch: Patch, write: bool = True) -> tuple[str, str]:
+    """Apply one required transformation. Returns (status, detail).
+
+    With `write=False` (--check) the transformation is verified but the file
+    is left untouched: PATCHABLE means the original form is present and the
+    patcher still recognizes it.
+    """
     text = path.read_text(encoding="utf-8")
 
     if patch.old in text:
@@ -117,6 +124,8 @@ def apply_patch(path: pathlib.Path, patch: Patch) -> tuple[str, str]:
         updated = text.replace(patch.old, patch.new)
         if patch.old in updated:
             return FAILED, "replacement did not remove the original form"
+        if not write:
+            return PATCHABLE, f"{occurrences} occurrence(s); --check did not write"
         path.write_text(updated, encoding="utf-8")
         return PATCHED, f"{occurrences} occurrence(s)"
 
@@ -155,16 +164,18 @@ def run_group(
     path: pathlib.Path,
     patches: list[Patch],
     results: list[tuple[str, str, str, str]],
+    write: bool = True,
 ) -> None:
     for patch in patches:
         try:
-            status, detail = apply_patch(path, patch)
+            status, detail = apply_patch(path, patch, write)
         except OSError as exc:
             status, detail = FAILED, f"cannot read/write {path}: {exc}"
         results.append((status, patch.name, str(path), detail))
 
 
 def main() -> int:
+    write = "--check" not in sys.argv[1:]
     agent_dir = pathlib.Path(
         os.environ.get("PI_CODING_AGENT_DIR") or (pathlib.Path.home() / ".pi" / "agent")
     )
@@ -194,14 +205,14 @@ def main() -> int:
     if chunk is None:
         failures.append(f"bundle chunk: {why}")
     else:
-        run_group(chunk, BUNDLE_PATCHES, results)
+        run_group(chunk, BUNDLE_PATCHES, results, write)
 
     # --- TUI markdown renderer (fixed package path, must exist) -----------
     tui_markdown = release / "node_modules" / TUI_PKG / "dist" / "components" / "markdown.js"
     if not tui_markdown.is_file():
         failures.append(f"required target missing: {tui_markdown}")
     else:
-        run_group(tui_markdown, TUI_PATCHES, results)
+        run_group(tui_markdown, TUI_PATCHES, results, write)
 
     # --- report -----------------------------------------------------------
     width = max((len(name) for _, name, _, _ in results), default=0)
@@ -225,7 +236,14 @@ def main() -> int:
 
     patched = sum(1 for r in results if r[0] == PATCHED)
     already = sum(1 for r in results if r[0] == ALREADY)
-    print(f"ok: {patched} patched, {already} already patched, 0 unprovable")
+    patchable = sum(1 for r in results if r[0] == PATCHABLE)
+    if not write:
+        print(
+            f"ok: check only — {already} already patched, {patchable} patchable, "
+            f"0 unprovable"
+        )
+    else:
+        print(f"ok: {patched} patched, {already} already patched, 0 unprovable")
     return 0
 
 
