@@ -73,7 +73,7 @@ fi
 # trees whose dependency manifests trip Dependabot for no real benefit; the
 # skill itself only needs SKILL.md, SYSTEM.md, scripts/ and references/.
 sync_dir "$SHARED_SKILLS_SRC" "$REPO_DIR/shared-skills" "shared-skills" \
-  --exclude='examples/' --exclude='tests/'
+  --exclude='examples/' --exclude='tests/' --delete-excluded
 
 # --- 5. Defense in depth --------------------------------------
 # 5a. Hard-fail if any forbidden (secret/runtime) path landed.
