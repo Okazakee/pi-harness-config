@@ -49,7 +49,7 @@ export GIT_CONFIG_GLOBAL=/dev/null
 export GIT_CONFIG_NOSYSTEM=1
 
 # ---------------------------------------------------------------- fake live config
-mkdir -p "$AGENT/agents" "$AGENT/extensions" "$AGENT/themes" "$AGENT/skills/demo" \
+mkdir -p "$AGENT/agents" "$AGENT/extensions" "$AGENT/extensions/todo" "$AGENT/themes" "$AGENT/skills/demo" \
          "$(dirname "$MCP")" "$SHARED/agentskill/scripts" \
          "$AGENT/sessions" "$AGENT/install" "$AGENT/npm" "$AGENT/bin" "$AGENT/git"
 
@@ -59,8 +59,10 @@ printf '{\n  "bindings": {}\n}\n' >"$AGENT/keybindings.json"
 printf '#!/usr/bin/env python3\nprint("fixture")\n' >"$AGENT/patch-pi-renderer.py"
 printf '\x89PNG\r\n\x1a\n fixture-logo' >"$AGENT/logo.png"
 printf '{\n  // declarative DCP policy\n  "enabled": true,\n  "keepRecent": 3\n}\n' >"$AGENT/dcp.jsonc"
+printf '{\n  "biome": {\n    "command": ["biome", "lsp-proxy"],\n    "extensions": [".ts"]\n  }\n}\n' >"$AGENT/pi-lsp.json"
 printf 'agent fixture\n' >"$AGENT/agents/reviewer.md"
 printf 'export default 1\n' >"$AGENT/extensions/fixture.ts"
+printf 'export const helperFixture = 1\n' >"$AGENT/extensions/todo/helper.ts"
 printf '{"name":"fixture-theme"}\n' >"$AGENT/themes/fixture.json"
 printf 'skill fixture\n' >"$AGENT/skills/demo/SKILL.md"
 printf '{"mcpServers":{"context7":{"url":"https://example.invalid/mcp"}}}\n' >"$MCP"
@@ -226,7 +228,7 @@ SH
 chmod +x "$REPO/scripts/check-repo.sh"
 
 # ---------------------------------------------------------------- 2. allowlisted round-trip
-for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc; do
+for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc pi-lsp.json; do
   if cmp -s "$AGENT/$f" "$REPO/pi/$f"; then
     pass "backup: pi/$f copied"
   else
@@ -241,6 +243,12 @@ for d in agents extensions themes skills; do
     fail "backup: pi/$d/ not mirrored"
   fi
 done
+
+if cmp -s "$AGENT/extensions/todo/helper.ts" "$REPO/pi/extensions/todo/helper.ts"; then
+  pass "backup: nested extension helper directory copied"
+else
+  fail "backup: nested extension helper directory was not copied"
+fi
 
 if cmp -s "$MCP" "$REPO/mcp/mcp.json"; then
   pass "backup: mcp/mcp.json copied"
@@ -282,6 +290,7 @@ MCP_SUM_BEFORE="$(sha256sum "$REPO/mcp/mcp.json" | awk '{print $1}')"
 printf 'corrupted\n' >"$AGENT/settings.json"
 printf 'corrupted\n' >"$AGENT/dcp.jsonc"
 rm -f "$AGENT/AGENTS.md"
+rm -rf "$AGENT/extensions/todo"
 printf 'corrupted\n' >"$MCP"
 
 rc=0
@@ -303,6 +312,12 @@ if [ -f "$AGENT/AGENTS.md" ] && cmp -s "$REPO/pi/AGENTS.md" "$AGENT/AGENTS.md"; 
   pass "restore: AGENTS.md restored after deletion"
 else
   fail "restore: AGENTS.md was not restored"
+fi
+
+if [ -f "$AGENT/extensions/todo/helper.ts" ] && cmp -s "$REPO/pi/extensions/todo/helper.ts" "$AGENT/extensions/todo/helper.ts"; then
+  pass "restore: nested extension helper directory round-trips"
+else
+  fail "restore: nested extension helper directory was not restored"
 fi
 
 DCP_SUM_AFTER="$(sha256sum "$AGENT/dcp.jsonc" | awk '{print $1}')"

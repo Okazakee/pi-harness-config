@@ -1,0 +1,100 @@
+# Backup and restore
+
+## What is backed up (allowlist)
+
+`~/.pi/agent`: `AGENTS.md`, `settings.json`, `dcp.jsonc`,
+`keybindings.json`, `patch-pi-renderer.py`, `logo.png`, `pi-lsp.json`, and the
+`agents/`, `extensions/`, `themes/`, `skills/` directories. Plus
+`~/.config/mcp/mcp.json` and `~/.agents/skills/`.
+
+## What is never backed up
+
+- `auth.json` — OAuth tokens and API keys
+- `sessions/` — conversation history
+- `install/`, `npm/`, `bin/`, `git/` — binaries and package trees
+- `models-store.json`, `mcp-cache.json` — regenerable caches
+- `__pycache__/`, `*.pyc`
+
+## Secrets — `.secrets/` (local, gitignored)
+
+Secrets are **not** stored in this repository. They live in a local, gitignored
+`.secrets/` folder at the repo root, one secret per file:
+
+- **filename** = the secret's name (e.g. `OPENCODE_GO_API_KEY`)
+- **file content** = the secret value
+
+The folder is a core part of the working setup but is never committed. Agents
+read a value only inside the command that needs it (e.g.
+`curl -H "Authorization: Bearer $(cat .secrets/TOKEN)"`) and never print it to
+chat, logs, or files. See [`.secrets/README.md`](../.secrets/README.md).
+
+## Backup and restore
+
+Backup is driven by the `pi-config-backup` skill
+(`~/.pi/agent/skills/pi-config-backup/`):
+
+```bash
+bash ~/.pi/agent/skills/pi-config-backup/scripts/backup.sh   # sync (no git ops)
+git -C ~/Desktop/Projects/pi-harness-config status           # review
+git -C ~/Desktop/Projects/pi-harness-config add -A && \
+  git -C ~/Desktop/Projects/pi-harness-config commit -m "pi config: ..."
+git -C ~/Desktop/Projects/pi-harness-config push             # requires authorization
+```
+
+Restore on a new machine (after installing Pi itself):
+
+```bash
+bash ~/.pi/agent/skills/pi-config-backup/scripts/restore.sh
+```
+
+`restore.sh` restores the config, then best-effort reinstalls the pieces that
+are **not** config: Pi packages (`pi update --extensions`), the `obscura` MCP
+binary (the exact release pinned in `deps/obscura.lock.json`, verified by
+SHA-256 before extraction), and the TUI renderer patch (plus its `systemd
+--user` update guard). It backs up any
+existing live config first, never touches `auth.json`, and activates the
+tracked Git hooks when it is restoring into a real Git checkout.
+
+- Flags: `--yes` (no prompt), `--no-packages`, `--no-obscura`, `--no-patch`.
+- Still manual: install Pi itself, then run `pi login` to store credentials.
+
+### Version preflight (backup only)
+
+Every backup starts by discovering the live versions/revisions of the harness
+— Pi (runtime plus the managed `install/current-version` marker, which must
+agree), RTK, every declared Pi package (`npm:` versions, `git:` commit pins),
+DCP's pinned commit, Obscura (installed vs `deps/obscura.lock.json`),
+TruffleHog (installed vs `deps/tools.lock.json`), Bun and Node. Discovery is
+local and offline: it reads local binaries, settings, lock files and git
+checkouts, never the network.
+
+The repository is compared against that inventory **before any file is
+copied**. Version drift is reported explicitly (`Pi 0.87.1 → 0.87.2`) and
+current snapshot metadata is refreshed — the README backup-time line in place,
+`pi/settings.json` through the normal copy. Drift alone never fails a backup.
+Blocking inconsistencies abort before the repository is touched: runtime Pi
+version vs the managed marker, installed TruffleHog vs the pinned version,
+installed Obscura vs the lock, a floating DCP pin, malformed lock metadata, or
+an undiscoverable required component. A final post-copy pass verifies that the
+snapshot describes the live Pi version and runs the repository contract.
+
+When Pi itself has changed since the previous snapshot, backup also runs the
+existing lightweight transition checks against the current install before
+copying: the renderer patcher's non-mutating `--check` signature proof,
+headless extension loading (including the repo's todo extension when it is not
+yet restored live), and the `cwd-switch`/`todo` suites when Bun is available.
+
+The preflight also compares the live inventory with `pi/versions.json`, the
+snapshot of the last **successful** backup. Unpinned component changes (RTK,
+Pi npm extensions, git sources, Bun/Node) are reported as `~ old → new`,
+`+ added`, or `- removed` but never block — they are history, not
+requirements. The snapshot is replaced only after the copy and every
+verification step succeeds, so a failed backup never advances it; the first
+coherent backup reports a baseline instead of fake drift. Hard locks and pins
+(`deps/*.lock.json`, the DCP commit) remain the only things that block, and
+`pi/versions.json` is never used to install anything.
+
+Backup never checks upstream for newer releases and never upgrades any
+dependency. It records what the machine actually has; intentional live changes
+are detected and snapshotted, upstream updates alone change nothing. Tests:
+`scripts/test-versions.sh`, `scripts/test-backup-restore.sh`.

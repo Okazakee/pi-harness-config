@@ -1,11 +1,11 @@
 ---
 name: pi-config-backup
-description: Back up the Pi coding-agent configuration (settings, agents, extensions, skills, themes, MCP servers, shared skills) into the private GitHub repo pi-harness-config. Use after editing any Pi config under ~/.pi/agent or ~/.config/mcp/mcp.json, or when the user asks to snapshot, back up, or push the Pi config.
+description: Back up the Pi coding-agent configuration (settings, agents, extensions, skills, themes, MCP servers, shared skills) into the public GitHub repo pi-harness-config. Use after editing any Pi config under ~/.pi/agent or ~/.config/mcp/mcp.json, or when the user asks to snapshot, back up, or push the Pi config.
 ---
 
 # Pi Config Backup
 
-Snapshot the live Pi configuration into the private backup repository
+Snapshot the live Pi configuration into the public backup repository
 `pi-harness-config`, and — on authorization — commit and push it.
 
 This is **configuration-as-code**, not a dump of runtime state. Credentials
@@ -27,7 +27,7 @@ and runtime state are deliberately absent.
 | Live MCP config | `~/.config/mcp/mcp.json` |
 | Live shared skills | `~/.agents/skills` |
 | Backup repo | `~/Desktop/Projects/pi-harness-config` |
-| Remote (private) | `git@github.com:Okazakee/pi-harness-config.git` |
+| Remote (public) | `git@github.com:Okazakee/pi-harness-config.git` |
 
 Override the repo location with `PI_BACKUP_REPO`, and the agent dir with
 `PI_CODING_AGENT_DIR`.
@@ -67,8 +67,8 @@ Override the repo location with `PI_BACKUP_REPO`, and the agent dir with
 
 ## What is backed up (allowlist)
 
-- `~/.pi/agent`: `AGENTS.md`, `settings.json`, `keybindings.json`,
-  `patch-pi-renderer.py`, `logo.png`
+- `~/.pi/agent`: `AGENTS.md`, `settings.json`, `dcp.jsonc`,
+  `keybindings.json`, `patch-pi-renderer.py`, `logo.png`, `pi-lsp.json`
 - `~/.pi/agent/agents/`, `extensions/`, `themes/`, `skills/` (recursive)
 - `~/.config/mcp/mcp.json`
 - `~/.agents/skills/` (shared skills Pi loads globally)
@@ -98,7 +98,8 @@ must never be committed.
   a second line of defense.
 - Never stage or commit `auth.json` or anything under `sessions/`.
 - Pushing is an external action: only push with explicit user authorization.
-- Verify the remote is private before pushing:
+- This remote is **public**: nothing secret may ever be staged or committed.
+  Confirm visibility before pushing:
   `gh repo view Okazakee/pi-harness-config --json visibility`.
 - Never force-push or rewrite history in the backup repo.
 

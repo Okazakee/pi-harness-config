@@ -8,11 +8,12 @@ not listed here are intentionally excluded.
 | `pi/AGENTS.md` | `~/.pi/agent/AGENTS.md` |
 | `pi/settings.json` | `~/.pi/agent/settings.json` |
 | `pi/dcp.jsonc` | `~/.pi/agent/dcp.jsonc` |
+| `pi/pi-lsp.json` | `~/.pi/agent/pi-lsp.json` |
 | `pi/keybindings.json` | `~/.pi/agent/keybindings.json` |
 | `pi/patch-pi-renderer.py` | `~/.pi/agent/patch-pi-renderer.py` |
 | `pi/logo.png` | `~/.pi/agent/logo.png` |
 | `pi/agents/` | `~/.pi/agent/agents/` (`*.md`) |
-| `pi/extensions/` | `~/.pi/agent/extensions/` (`*.ts`) |
+| `pi/extensions/` | `~/.pi/agent/extensions/` (recursive; `todo.ts` plus the `todo/` helper modules) |
 | `pi/themes/` | `~/.pi/agent/themes/` (`*.json`) |
 | `pi/skills/` | `~/.pi/agent/skills/` (recursive) |
 | `mcp/mcp.json` | `~/.config/mcp/mcp.json` |
@@ -46,6 +47,7 @@ counterpart to restore.
 | `deps/tools.lock.json` | Authoritative tool pins: TruffleHog version plus per-platform SHA-256. Consumed by `scripts/install-trufflehog.sh` and `scripts/check-secrets.sh`. |
 | `.githooks/` | Tracked `pre-commit` and `pre-push` validators. Activated per clone with `scripts/install-hooks.sh` (or automatically by `restore.sh` when restoring into a Git checkout). |
 | `scripts/` | Repository checks, secret scanning, pinned installers, the Obscura lock updater, and the isolated test scripts. |
+| `docs/` | Scoped repository documentation: this provenance map, extensions/context management, backup and restore, reproducibility, and repository integrity. Repo-only; no live counterpart. |
 | `pi/versions.json` | Generated, non-secret inventory of the live harness versions/revisions observed during the last **successful** backup (Pi, tools, direct npm packages, git checkouts, runtimes). A historical snapshot for drift reporting, **not** a lock file: hard pins stay in `deps/*.lock.json` and `pi/settings.json`, and it is never copied into `~/.pi/agent` nor used by `restore.sh`. Refreshed by `backup.sh` only after verification succeeds. |
 | `systemd/` | `systemd --user` path unit + service that re-apply `pi/patch-pi-renderer.py` whenever the managed Pi version changes. Installed by `scripts/install-renderer-guard.sh` into `~/.config/systemd/user/`; not part of the config backup. |
 | `.github/workflows/verify.yml` | Independent CI verification. Actions pinned to exact commit SHAs; runs the same checks as the local hooks. |
@@ -63,10 +65,12 @@ backup/restore implementation (`backup.sh`, `restore.sh`, `obscura-lib.sh`).
   secret name, **content** = value. It is intentionally absent from git and
   from the backup; agents read values from it without printing them.
 - `pi/extensions/todo.ts` owns the session todo board used for long execution
-  scopes. The board itself is **runtime session data** (stored in Pi session
-  entries under `~/.pi/agent/sessions/`, which is deliberately not backed up);
-  only the extension code and its tests (`scripts/todo.test.ts`,
-  `scripts/test-todo.sh`) live in this repository.
+  scopes; the implementation is split into `pi/extensions/todo/*` helper
+  modules, with `todo.ts` remaining the discoverable entrypoint. The board
+  itself is **runtime session data** (stored in Pi session entries under
+  `~/.pi/agent/sessions/`, which is deliberately not backed up); only the
+  extension code and its tests (`scripts/todo/`, `scripts/test-todo.sh`) live
+  in this repository.
 - `~/.agents/skills/agentskill` is a git clone of a public upstream skill.
   `shared-skills/` keeps a copy so the harness survives even if upstream moves;
   the nested `.git/` directory and the dev-only `examples/` and `tests/` trees
