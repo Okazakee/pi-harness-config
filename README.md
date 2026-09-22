@@ -199,9 +199,9 @@ repository change: review it and commit it deliberately.
 Three layers, none of which replaces another:
 
 ```text
-pre-commit   fast developer feedback   repository invariants + staged secret scan
-pre-push     stronger local gate       scanner self-test + full history scan + integration tests
-GitHub CI    independent authority     the same checks in a clean environment
+pre-commit                    fast local prevention      repository invariants + staged secret scan
+pre-push                      stronger local prevention  scanner self-test + full history scan + integration tests
+required GitHub CI + ruleset  remote publication gate    the same checks in a clean environment
 ```
 
 Hooks are tracked in `.githooks/` and are not active until you point Git at
@@ -234,9 +234,12 @@ scripts/test-obscura-restore.sh    # Obscura lock + checksum logic
 scripts/test-cwd-switch.sh         # /cd extension unit + wiring tests
 ```
 
-Branch protection is **not** configured by this repository. You may later
-require the `verify` workflow to pass before merging into `main` in the GitHub
-repository settings; that is a deliberate, manual decision.
+`main` is protected by the active repository ruleset `Protect main`: changes
+must arrive through a pull request, the `repository contract` check from
+`.github/workflows/verify.yml` must pass tested against the current base,
+force-pushes are rejected, deletion is blocked, and no bypass actors are
+configured. `--no-verify` can bypass the local hooks, but it cannot publish
+directly to protected `main`.
 
 ## Secret scanning
 
