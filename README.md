@@ -81,11 +81,16 @@ git -C ~/Desktop/Projects/pi-harness-config add -A && \
 git -C ~/Desktop/Projects/pi-harness-config push             # requires authorization
 ```
 
-Restore on a new machine:
+Restore on a new machine (after installing Pi itself):
 
 ```bash
 bash ~/.pi/agent/skills/pi-config-backup/scripts/restore.sh
 ```
 
-Then re-authenticate (`pi login`), reinstall the packages listed in
-`settings.json`, and re-run `python3 ~/.pi/agent/patch-pi-renderer.py`.
+`restore.sh` restores the config, then best-effort reinstalls the pieces that
+are **not** config: Pi packages (`pi update --extensions`), the `obscura` MCP
+binary (latest GitHub release for the detected platform), and the TUI renderer
+patch. It backs up any existing live config first, and never touches `auth.json`.
+
+- Flags: `--yes` (no prompt), `--no-packages`, `--no-obscura`, `--no-patch`.
+- Still manual: install Pi itself, then run `pi login` to store credentials.

@@ -108,6 +108,10 @@ must never be committed.
 bash ~/.pi/agent/skills/pi-config-backup/scripts/restore.sh
 ```
 
-Then re-authenticate (`pi login`) and reinstall packages listed in
-`settings.json` (`auth.json` and the `npm/`/`install/` trees are intentionally
-not backed up).
+Restores config, then best-effort reinstalls the non-config pieces: Pi packages
+(`pi update --extensions`), the `obscura` MCP binary (latest GitHub release for
+the detected platform), and the TUI renderer patch. Backs up existing live
+config first; never writes `auth.json`.
+
+- Flags: `--yes`, `--no-packages`, `--no-obscura`, `--no-patch`.
+- Still manual: install Pi itself, then `pi login`.

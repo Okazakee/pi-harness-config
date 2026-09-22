@@ -29,6 +29,7 @@ not listed here are intentionally excluded.
 | `~/.pi/agent/git/` | Git package cache — re-cloned |
 | `~/.pi/agent/models-store.json` | Regenerable model catalog cache |
 | `~/.pi/agent/mcp-cache.json` | Regenerable MCP tool-metadata cache |
+| `~/.local/bin/obscura`, `obscura-worker` | obscura MCP browser binaries — reinstalled by `restore.sh` from `github.com/h4ckf0r0day/obscura` releases |
 | `~/.pi/agent/__pycache__/` | Python bytecode |
 
 ## Notes

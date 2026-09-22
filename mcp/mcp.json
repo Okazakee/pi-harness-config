@@ -7,7 +7,7 @@
       "url": "https://mcp.grep.app"
     },
     "obscura": {
-      "command": "/home/okazakee/.local/bin/obscura",
+      "command": "obscura",
       "args": ["mcp"]
     }
   }
