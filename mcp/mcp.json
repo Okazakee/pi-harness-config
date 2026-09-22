@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "context7": {
+      "url": "https://mcp.context7.com/mcp"
+    },
+    "gh_grep": {
+      "url": "https://mcp.grep.app"
+    },
+    "obscura": {
+      "command": "/home/okazakee/.local/bin/obscura",
+      "args": ["mcp"]
+    }
+  }
+}

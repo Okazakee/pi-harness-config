@@ -1,0 +1,62 @@
+# ============================================================
+# pi-harness-config — defensive .gitignore
+# The backup itself is ALLOWLIST-based (see
+# ~/.pi/agent/skills/pi-config-backup/scripts/backup.sh).
+# These patterns are a second line of defense only: they must
+# never be the primary mechanism protecting secrets.
+# ============================================================
+
+# --- Environment & credentials --------------------------------
+.env
+.env.*
+!.env.example
+auth.json
+credentials*
+secrets*
+tokens*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.gpg
+*.asc
+
+# --- Databases / runtime state --------------------------------
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.wal
+*.shm
+
+# --- Logs / caches / sessions --------------------------------
+*.log
+logs/
+cache/
+caches/
+sessions/
+history/
+run/
+*.cache
+models-store.json
+mcp-cache.json
+
+# --- Pi runtime ------------------------------------------------
+install/
+npm/
+bin/
+git/
+
+# --- Misc runtime ---------------------------------------------
+.DS_Store
+Thumbs.db
+node_modules/
+__pycache__/
+*.pyc
+dist/
+build/

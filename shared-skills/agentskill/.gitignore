@@ -1,0 +1,14 @@
+scripts/__pycache__/
+__pycache__/
+*.pyc
+.venv/
+.ruff_cache/
+.pytest_cache/
+.codex
+.coverage
+agentskill.egg-info/
+dist/
+build/
+.mypy_cache/
+*.egg-info/
+*.egg

@@ -1,0 +1,27 @@
+{
+  "lastChangelogVersion": "0.87.0",
+  "theme": "okazakee",
+  "hideThinkingBlock": true,
+  "defaultProvider": "opencode-go",
+  "defaultModel": "deepseek-v4.1-flash",
+  "tuiMode": "fullscreen",
+  "fullscreenExitOutput": "resume-hint",
+  "markdown": {
+    "codeBlockIndent": "  │ "
+  },
+  "terminal": {
+    "trueColor": true,
+    "images": "auto",
+    "showImages": true
+  },
+  "packages": [
+    "npm:@narumitw/pi-lsp",
+    "npm:@narumitw/pi-plan-mode",
+    "npm:@mjakl/pi-subagent",
+    "npm:@counterposition/pi-web-search",
+    "npm:@narumitw/pi-btw",
+    "npm:@narumitw/pi-goal",
+    "npm:pi-mcp-adapter",
+    "https://github.com/ayghri/i-have-adhd"
+  ]
+}
