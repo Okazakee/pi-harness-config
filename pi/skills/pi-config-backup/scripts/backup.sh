@@ -40,12 +40,14 @@ for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png;
 done
 
 # --- 2. Declarative directories (mirror; stale files removed) --
-sync_dir() { # src dst label
+sync_dir() { # src dst label [extra rsync args...]
   local src="$1" dst="$2" label="$3"
+  shift 3
   if [ -d "$src" ]; then
     mkdir -p "$dst"
     rsync -a --delete \
       --exclude='.git/' --exclude='__pycache__/' --exclude='*.pyc' --exclude='node_modules/' \
+      "$@" \
       "$src/" "$dst/"
     log "synced $label ($(find "$dst" -type f | wc -l | tr -d ' ') files)"
   else
@@ -67,7 +69,11 @@ else
 fi
 
 # --- 4. Shared skills Pi loads globally -----------------------
-sync_dir "$SHARED_SKILLS_SRC" "$REPO_DIR/shared-skills" "shared-skills"
+# The third-party agentskill clone ships dev-only `examples/` and `tests/`
+# trees whose dependency manifests trip Dependabot for no real benefit; the
+# skill itself only needs SKILL.md, SYSTEM.md, scripts/ and references/.
+sync_dir "$SHARED_SKILLS_SRC" "$REPO_DIR/shared-skills" "shared-skills" \
+  --exclude='examples/' --exclude='tests/'
 
 # --- 5. Defense in depth --------------------------------------
 # 5a. Hard-fail if any forbidden (secret/runtime) path landed.

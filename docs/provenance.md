@@ -35,7 +35,9 @@ not listed here are intentionally excluded.
 
 - `~/.agents/skills/agentskill` is a git clone of a public upstream skill.
   `shared-skills/` keeps a copy so the harness survives even if upstream moves;
-  the nested `.git/` directory is excluded.
+  the nested `.git/` directory and the dev-only `examples/` and `tests/` trees
+  are excluded (they carry dependency manifests that trigger Dependabot for no
+  runtime benefit).
 - `~/.config/opencode/skills/ponytail` is an OpenCode skill that Pi does not
   currently load. It is not backed up here; migrate it into
   `~/.pi/agent/skills/` if Pi should load it.
