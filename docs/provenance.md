@@ -33,6 +33,9 @@ not listed here are intentionally excluded.
 
 ## Notes
 
+- `.secrets/` (repo root) is a local, gitignored secret store: **filename** =
+  secret name, **content** = value. It is intentionally absent from git and
+  from the backup; agents read values from it without printing them.
 - `~/.agents/skills/agentskill` is a git clone of a public upstream skill.
   `shared-skills/` keeps a copy so the harness survives even if upstream moves;
   the nested `.git/` directory and the dev-only `examples/` and `tests/` trees

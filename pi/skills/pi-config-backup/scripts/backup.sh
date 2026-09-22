@@ -83,6 +83,13 @@ for forbidden in auth.json sessions install npm bin git models-store.json mcp-ca
   fi
 done
 
+# 5a-bis. The local .secrets/ store must never be tracked by git.
+if git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  if git -C "$REPO_DIR" ls-files --error-unmatch .secrets >/dev/null 2>&1; then
+    fail ".secrets/ is tracked by git — it must stay gitignored and uncommitted"
+  fi
+fi
+
 # 5b. Warn (do not fail) on secret-like patterns so a human reviews.
 hits="$(grep -rInE '(sk-[A-Za-z0-9]{16,}|gho_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|BEGIN [A-Z ]*PRIVATE KEY)' \
   "$REPO_DIR/pi" "$REPO_DIR/mcp" "$REPO_DIR/shared-skills" 2>/dev/null || true)"

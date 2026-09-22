@@ -126,6 +126,18 @@ Do not introduce a preferred technology merely to replace an existing working co
 
 Prefer architecture and invariants over trial-and-error editing until checks turn green.
 
+### 4.1 Local secret store
+
+Secrets live as one file per secret in
+`~/Desktop/Projects/pi-harness-config/.secrets/` (**filename** = secret name,
+**content** = value). The folder is gitignored and must never be committed.
+
+- Read a secret only inside the command that needs it, e.g.
+  `curl -H "Authorization: Bearer $(cat ~/Desktop/Projects/pi-harness-config/.secrets/TOKEN)"`.
+- Never echo, print, log, or copy a secret value into chat, logs, or generated
+  files. Refer to secrets by name.
+- If the folder or a named file is missing, say so — never invent a value.
+
 ---
 
 ## 5. Quality Standard

@@ -29,6 +29,7 @@ pi-harness-config/
 ├── mcp/
 │   └── mcp.json                # MCP servers Pi reads (~/.config/mcp/mcp.json)
 ├── shared-skills/              # ~/.agents/skills (skills Pi loads globally)
+├── .secrets/                   # LOCAL secret store — gitignored, never committed
 └── docs/
     └── provenance.md           # live source path of every backed-up file
 ```
@@ -53,6 +54,19 @@ server definitions. Credentials and runtime state are deliberately absent.
 - `install/`, `npm/`, `bin/`, `git/` — binaries and package trees
 - `models-store.json`, `mcp-cache.json` — regenerable caches
 - `__pycache__/`, `*.pyc`
+
+## Secrets — `.secrets/` (local, gitignored)
+
+Secrets are **not** stored in this repository. They live in a local, gitignored
+`.secrets/` folder at the repo root, one secret per file:
+
+- **filename** = the secret's name (e.g. `OPENCODE_GO_API_KEY`)
+- **file content** = the secret value
+
+The folder is a core part of the working setup but is never committed. Agents
+read a value only inside the command that needs it (e.g.
+`curl -H "Authorization: Bearer $(cat .secrets/TOKEN)"`) and never print it to
+chat, logs, or files. See [`.secrets/README.md`](.secrets/README.md).
 
 ## Backup and restore
 

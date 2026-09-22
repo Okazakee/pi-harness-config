@@ -7,6 +7,8 @@
 # ============================================================
 
 # --- Environment & credentials --------------------------------
+# Local secret store: filename = secret name, content = value. NEVER committed.
+.secrets/
 .env
 .env.*
 !.env.example

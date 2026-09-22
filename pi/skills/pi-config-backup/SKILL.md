@@ -81,6 +81,17 @@ Override the repo location with `PI_BACKUP_REPO`, and the agent dir with
 - `models-store.json`, `mcp-cache.json` — regenerable caches
 - `__pycache__/`, `*.pyc`
 
+## Secrets — `.secrets/` (local, gitignored)
+
+Secrets live in `.secrets/` at the backup-repo root, one secret per file:
+**filename** = secret name, **content** = value. The folder is gitignored and
+must never be committed.
+
+- Read a secret only inside the command that needs it, e.g.
+  `curl -H "Authorization: Bearer $(cat ~/Desktop/Projects/pi-harness-config/.secrets/TOKEN)"`.
+- Never echo, print, log, or copy a secret value into chat or files.
+- The backup script refuses to run if `.secrets/` is ever tracked by git.
+
 ## Safety rules
 
 - The allowlist in `scripts/backup.sh` is authoritative; `.gitignore` is only
