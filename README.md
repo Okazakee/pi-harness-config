@@ -45,7 +45,11 @@ git -C ~/Desktop/Projects/pi-harness-config push             # requires authoriz
 
 `backup.sh` refuses to overwrite uncommitted repository edits in
 live-mirrored paths that differ from the live config; pass
-`--overwrite-repo-edits` to discard them deliberately.
+`--overwrite-repo-edits` to discard them deliberately. Optional sources
+removed from live are removed from the snapshot too; required sources
+(`settings.json`, `extensions/`, `patch-pi-renderer.py`, `skills/`) abort the
+backup when missing, and a failure before the copy phase leaves the
+repository unchanged.
 
 Restore on a new machine (after installing Pi itself, clone the repo first —
 the live `~/.pi/agent/skills/...` path only exists after a restore):

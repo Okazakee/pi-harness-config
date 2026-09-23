@@ -140,15 +140,15 @@ fi
 
 exact_ok=1
 for v in 1.2.3 0.49.8 1.2.3-beta.1 1.2.3+build.5 1.2.3-rc.1+build.2; do
-  versions_npm_pin_is_exact "$v" || { fail "exact semver '$v' was rejected"; exact_ok=0; }
+  versions_npm_pin_is_exact "$v" || { fail "exact version '$v' was rejected"; exact_ok=0; }
 done
-for v in 1x.2.3 1.2.3foo '^1.2.3' '~1.2.3' '1.2' latest '' '1.2.3 - 2.0.0' 'v1.2.3'; do
+for v in 01.2.3 1.02.3 1.2.03 1x.2.3 1.2.3foo '^1.2.3' '~1.2.3' '1.2' latest '' '1.2.3 - 2.0.0' 'v1.2.3' '1.2.3-' '1.2.3-a..b' '1.2.3+'; do
   if versions_npm_pin_is_exact "$v"; then
     fail "non-exact version '$v' was accepted"
     exact_ok=0
   fi
 done
-[ "$exact_ok" -eq 1 ] && pass "exact-semver validation accepts only strict semver pins"
+[ "$exact_ok" -eq 1 ] && pass "exact-version validation accepts only exact, well-formed versions"
 
 # ---------------------------------------------------------------- Pi unchanged
 new_case
@@ -177,14 +177,20 @@ else
   fail "Pi upgrade did not report drift"
 fi
 rc=0
-versions_preflight "$AGENT" "$REPO" --refresh >"$WORK/upgrade.log" 2>&1 || rc=$?
+versions_preflight "$AGENT" "$REPO" >"$WORK/upgrade.log" 2>&1 || rc=$?
 if [ "$rc" -eq 0 ]; then
   pass "Pi upgrade preflight exits 0 (drift is not an error)"
 else
   fail "Pi upgrade preflight exited $rc"
 fi
+if grep -q '0.87.1' "$REPO/README.md"; then
+  pass "preflight is read-only (README not refreshed before the copy phase)"
+else
+  fail "preflight mutated README metadata"
+fi
+versions_refresh_snapshot_metadata "$REPO" >/dev/null 2>&1
 if grep -q '0.87.2' "$REPO/README.md"; then
-  pass "Pi upgrade refreshes README snapshot metadata"
+  pass "explicit metadata refresh writes the live Pi version"
 else
   fail "README was not refreshed to 0.87.2"
 fi
@@ -370,7 +376,7 @@ write_stub pi "0.87.1"
 printf '0.87.1' >"$AGENT/install/current-version"
 printf 'Pi 0.87.0 introduced the migration pipeline.\n' >"$REPO/docs/history.md"
 before="$(cat "$REPO/docs/history.md")"
-preflight_out="$(versions_preflight "$AGENT" "$REPO" --refresh 2>&1)"
+preflight_out="$(versions_preflight "$AGENT" "$REPO" 2>&1)"
 after="$(cat "$REPO/docs/history.md")"
 if [ "$before" = "$after" ]; then
   pass "historical version reference is not rewritten"
@@ -387,8 +393,14 @@ if printf '%s' "$preflight_out" | grep -q 'Version drift detected: Pi 0.87.0 →
 else
   fail "stale snapshot drift not detected"
 fi
+if grep -q '0.87.0' "$REPO/README.md" && grep -q '0.87.0' "$REPO/pi/settings.json"; then
+  pass "preflight leaves snapshot metadata for the explicit refresh step"
+else
+  fail "preflight mutated snapshot metadata"
+fi
+versions_refresh_snapshot_metadata "$REPO" >/dev/null 2>&1
 if grep -q '0.87.1' "$REPO/README.md" && grep -q '0.87.0' "$REPO/pi/settings.json"; then
-  pass "README refreshed; repo settings left for the copy phase"
+  pass "explicit refresh updates README; repo settings left for the copy phase"
 else
   fail "snapshot metadata refresh path is wrong"
 fi

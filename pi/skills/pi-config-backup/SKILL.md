@@ -73,6 +73,13 @@ Override the repo location with `PI_BACKUP_REPO`, and the agent dir with
 - `~/.config/mcp/mcp.json`
 - `~/.agents/skills/` (shared skills Pi loads globally)
 
+Absence is mirrored: an optional source removed from live is removed from the
+snapshot too, so a restore cannot resurrect it. Required sources must exist —
+`settings.json`, `extensions/`, `patch-pi-renderer.py` and `skills/` — and
+abort the backup before any copy when missing. Optional sources: `AGENTS.md`,
+`keybindings.json`, `logo.png`, `dcp.jsonc`, `pi-lsp.json`, `agents/`,
+`themes/`, `mcp/mcp.json` and `shared-skills/`.
+
 ## Never backed up
 
 - `auth.json` — OAuth tokens and API keys
@@ -105,6 +112,8 @@ must never be committed.
 - The backup refuses to overwrite uncommitted repository edits in
   live-mirrored paths that differ from the live config. Sync them to the live
   config, or pass `--overwrite-repo-edits` deliberately.
+- The pre-copy phase is read-only: a backup that aborts before the copy
+  phase leaves the repository byte-identical.
 
 ## Pinned packages
 
