@@ -138,6 +138,18 @@ else
   fail "semver probe mangled v22.22.0: got '$(versions_probe node --version)'"
 fi
 
+exact_ok=1
+for v in 1.2.3 0.49.8 1.2.3-beta.1 1.2.3+build.5 1.2.3-rc.1+build.2; do
+  versions_npm_pin_is_exact "$v" || { fail "exact semver '$v' was rejected"; exact_ok=0; }
+done
+for v in 1x.2.3 1.2.3foo '^1.2.3' '~1.2.3' '1.2' latest '' '1.2.3 - 2.0.0' 'v1.2.3'; do
+  if versions_npm_pin_is_exact "$v"; then
+    fail "non-exact version '$v' was accepted"
+    exact_ok=0
+  fi
+done
+[ "$exact_ok" -eq 1 ] && pass "exact-semver validation accepts only strict semver pins"
+
 # ---------------------------------------------------------------- Pi unchanged
 new_case
 discover
@@ -276,14 +288,21 @@ discover
 expect_status "URL branch ref is not an exact pin" "git:github.com/ayghri/i-have-adhd" "BLOCK"
 expect_blocked "URL branch ref blocks backup"
 
+new_case
+make_checkout ayghri/i-have-adhd >/dev/null
+write_live_settings '["https://github.com/ayghri/i-have-adhd"]'
+discover
+expect_status "bare URL source is not a contract pin" "git:github.com/ayghri/i-have-adhd" "BLOCK"
+expect_blocked "bare URL source blocks backup"
+
 # ---------------------------------------------------------------- npm packages
 new_case
 mkdir -p "$AGENT/npm/node_modules/@narumitw/pi-goal"
 printf '{ "version": "0.54.8" }' >"$AGENT/npm/node_modules/@narumitw/pi-goal/package.json"
 write_live_settings '["npm:@narumitw/pi-goal"]'
 discover
-expect_status "npm package version is discovered" "npm:@narumitw/pi-goal" "OK"
-expect_clear "npm package discovery does not block"
+expect_status "npm package without an exact version is BLOCK" "npm:@narumitw/pi-goal" "BLOCK"
+expect_blocked "npm package without an exact version blocks backup"
 
 new_case
 mkdir -p "$AGENT/npm/node_modules/@narumitw/pi-goal"
@@ -320,8 +339,16 @@ mkdir -p "$AGENT/npm/node_modules/@narumitw/pi-goal"
 printf '{ "version": "0.55.0" }' >"$AGENT/npm/node_modules/@narumitw/pi-goal/package.json"
 write_live_settings '["npm:@narumitw/pi-goal@^0.54.8"]'
 discover
-expect_status "npm range spec stays informational (not a pin)" "npm:@narumitw/pi-goal" "OK"
-expect_clear "npm range spec does not block"
+expect_status "npm range spec is BLOCK" "npm:@narumitw/pi-goal" "BLOCK"
+expect_blocked "npm range spec blocks backup"
+
+new_case
+mkdir -p "$AGENT/npm/node_modules/@narumitw/pi-goal"
+printf '{ "version": "0.55.0" }' >"$AGENT/npm/node_modules/@narumitw/pi-goal/package.json"
+write_live_settings '["npm:@narumitw/pi-goal@1x.2.3"]'
+discover
+expect_status "malformed npm version is BLOCK" "npm:@narumitw/pi-goal" "BLOCK"
+expect_blocked "malformed npm version blocks backup"
 
 new_case
 mkdir -p "$AGENT/npm/node_modules/@narumitw/pi-goal"
@@ -433,40 +460,41 @@ else
   fail "snapshot: unchanged inventory reported changes"
 fi
 
-# ---- unpinned package drift, addition, removal --------------------------
+# ---- pinned package drift, addition, removal ---------------------------
 mkdir -p "$AGENT/npm/node_modules/@narumitw/pi-goal"
 printf '{ "version": "0.54.8" }' >"$AGENT/npm/node_modules/@narumitw/pi-goal/package.json"
-write_live_settings '["npm:@narumitw/pi-goal"]'
+write_live_settings '["npm:@narumitw/pi-goal@0.54.8"]'
 discover
 staged="$(versions_snapshot_stage "$REPO")" && versions_snapshot_commit "$staged" "$REPO"
 printf '{ "version": "0.55.0" }' >"$AGENT/npm/node_modules/@narumitw/pi-goal/package.json"
+write_live_settings '["npm:@narumitw/pi-goal@0.55.0"]'
 drift_out="$(versions_preflight "$AGENT" "$REPO" 2>&1)"
 if printf '%s' "$drift_out" | grep -q '~ packages.@narumitw/pi-goal 0.54.8 → 0.55.0'; then
-  pass "snapshot: unpinned package drift is reported OLD → NEW"
+  pass "snapshot: deliberate pin bump is reported OLD → NEW"
 else
   fail "snapshot: package drift not reported"
 fi
 rc=0
 versions_preflight "$AGENT" "$REPO" >/dev/null 2>&1 || rc=$?
 if [ "$rc" -eq 0 ]; then
-  pass "snapshot: unpinned package drift does not block"
+  pass "snapshot: coherent pin bump (installed == pin) does not block"
 else
-  fail "snapshot: package drift blocked backup (rc=$rc)"
+  fail "snapshot: coherent pin bump blocked backup (rc=$rc)"
 fi
 
-write_live_settings '["npm:@narumitw/pi-goal","npm:@narumitw/pi-lsp"]'
+write_live_settings '["npm:@narumitw/pi-goal@0.55.0","npm:@narumitw/pi-lsp@0.49.8"]'
 mkdir -p "$AGENT/npm/node_modules/@narumitw/pi-lsp"
 printf '{ "version": "0.49.8" }' >"$AGENT/npm/node_modules/@narumitw/pi-lsp/package.json"
 added_out="$(versions_preflight "$AGENT" "$REPO" 2>&1)"
 if printf '%s' "$added_out" | grep -q '+ packages.@narumitw/pi-lsp 0.49.8'; then
-  pass "snapshot: added package is reported"
+  pass "snapshot: added pinned package is reported"
 else
   fail "snapshot: added package not reported"
 fi
 discover
 staged="$(versions_snapshot_stage "$REPO")" && versions_snapshot_commit "$staged" "$REPO"
 
-write_live_settings '["npm:@narumitw/pi-goal"]'
+write_live_settings '["npm:@narumitw/pi-goal@0.55.0"]'
 removed_out="$(versions_preflight "$AGENT" "$REPO" 2>&1)"
 if printf '%s' "$removed_out" | grep -q -- '- packages.@narumitw/pi-lsp 0.49.8'; then
   pass "snapshot: removed package is reported"
@@ -476,10 +504,10 @@ fi
 
 # Configured but missing stays visible as MISSING while history reports the
 # removal — it is not silently omitted.
-write_live_settings '["npm:@narumitw/pi-goal","npm:@narumitw/pi-lsp"]'
+write_live_settings '["npm:@narumitw/pi-goal@0.55.0","npm:@narumitw/pi-lsp@0.49.8"]'
 rm -f "$AGENT/npm/node_modules/@narumitw/pi-lsp/package.json"
 discover
-expect_status "snapshot: configured-but-missing package stays MISSING" "npm:@narumitw/pi-lsp" "MISSING"
+expect_status "snapshot: configured-but-missing pinned package stays MISSING" "npm:@narumitw/pi-lsp" "MISSING"
 missing_out="$(versions_preflight "$AGENT" "$REPO" 2>&1)"
 if printf '%s' "$missing_out" | grep -q -- '- packages.@narumitw/pi-lsp 0.49.8'; then
   pass "snapshot: configured-but-missing package is reported as removed from history"
@@ -488,7 +516,7 @@ else
 fi
 write_live_settings
 
-# ---- RTK and git SHA drift are informational ----------------------------
+# ---- RTK drift is informational (tools are not contract pins) -----------
 new_case
 discover
 staged="$(versions_snapshot_stage "$REPO")" && versions_snapshot_commit "$staged" "$REPO"
@@ -506,20 +534,21 @@ write_stub rtk "rtk 0.49.0"
 
 new_case
 sha_a="$(make_checkout ayghri/i-have-adhd)"
-write_live_settings '["https://github.com/ayghri/i-have-adhd"]'
+write_live_settings "[\"https://github.com/ayghri/i-have-adhd@$sha_a\"]"
 discover
 staged="$(versions_snapshot_stage "$REPO")" && versions_snapshot_commit "$staged" "$REPO"
 git -C "$AGENT/git/github.com/ayghri/i-have-adhd" -c user.email=fixture@test -c user.name=fixture commit -q --allow-empty -m second
 sha_b="$(git -C "$AGENT/git/github.com/ayghri/i-have-adhd" rev-parse HEAD)"
+write_live_settings "[\"https://github.com/ayghri/i-have-adhd@$sha_b\"]"
 git_out="$(versions_preflight "$AGENT" "$REPO" 2>&1)"
 if [ "$sha_a" != "$sha_b" ] && printf '%s' "$git_out" | grep -q "~ git.i-have-adhd $sha_a → $sha_b"; then
-  pass "snapshot: unpinned git revision drift is reported"
+  pass "snapshot: deliberate git pin bump is reported"
 else
-  fail "snapshot: git revision drift not reported"
+  fail "snapshot: git pin bump not reported"
 fi
 rc=0
 versions_preflight "$AGENT" "$REPO" >/dev/null 2>&1 || rc=$?
-[ "$rc" -eq 0 ] && pass "snapshot: unpinned git drift does not block" || fail "snapshot: git drift blocked (rc=$rc)"
+[ "$rc" -eq 0 ] && pass "snapshot: coherent git pin bump does not block" || fail "snapshot: git pin bump blocked (rc=$rc)"
 
 # ---- a failing hard pin never advances the snapshot ---------------------
 new_case

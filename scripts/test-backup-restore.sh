@@ -12,6 +12,8 @@
 # before replacing it, and the live version preflight runs before the copy
 # phase, reports Pi drift, refreshes snapshot metadata, runs the local Pi
 # transition compatibility checks, and runs the repository contract afterwards.
+# The pre-copy guard blocks repository-only edits that differ from live
+# unless --overwrite-repo-edits is passed.
 # ============================================================
 set -uo pipefail
 
@@ -106,6 +108,11 @@ touch "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/.check-repo-ran"
 exit 0
 SH
 chmod +x "$REPO/scripts/check-repo.sh"
+
+# The repository starts as a clean checkout; the guard must not mistake the
+# committed fixture metadata for uncommitted repository-only edits.
+git -C "$REPO" add -A
+git -C "$REPO" -c user.email=fixture@test -c user.name=fixture commit -q -m "fixture snapshot"
 
 # ---------------------------------------------------------------- 1. backup
 rc=0
@@ -280,6 +287,59 @@ if grep -rIl 'super-secret-fixture-value' "$REPO" >/dev/null 2>&1; then
   fail "backup: auth.json content leaked into the snapshot"
 else
   pass "backup: auth.json content absent from the snapshot"
+fi
+
+# ---------------------------------------------------------------- 3b. dirty-repo guard
+# A tracked repository-only edit that differs from live must block before any
+# copy, and must be preserved.
+git -C "$REPO" add pi/agents/reviewer.md
+git -C "$REPO" -c user.email=fixture@test -c user.name=fixture commit -q -m "track reviewer fixture"
+printf 'repository-only edit\n' >"$REPO/pi/agents/reviewer.md"
+rc=0
+bash "$BACKUP_SH" >"$WORK/backup-guard.log" 2>&1 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'local edits in live-mirrored paths' "$WORK/backup-guard.log"; then
+  pass "backup: repository-only edit blocks the copy"
+else
+  fail "backup: repository-only edit did not block (rc=$rc)"
+fi
+if grep -q 'repository-only edit' "$REPO/pi/agents/reviewer.md"; then
+  pass "backup: blocked run preserved the repository edit"
+else
+  fail "backup: blocked run overwrote the repository edit"
+fi
+if grep -q 'copied pi/AGENTS.md' "$WORK/backup-guard.log"; then
+  fail "backup: blocked run copied files despite the guard"
+else
+  pass "backup: blocked run performed no copy"
+fi
+
+# An untracked repository-only file is the same hazard.
+printf 'untracked repository-only file\n' >"$REPO/pi/agents/untracked.md"
+rc=0
+bash "$BACKUP_SH" >"$WORK/backup-guard-untracked.log" 2>&1 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  pass "backup: untracked repository-only file blocks the copy"
+else
+  fail "backup: untracked repository-only file did not block (rc=$rc)"
+fi
+rm -f "$REPO/pi/agents/untracked.md"
+
+# The escape hatch deliberately discards the conflicting edit.
+rc=0
+bash "$BACKUP_SH" --overwrite-repo-edits >"$WORK/backup-overwrite.log" 2>&1 || rc=$?
+if [ "$rc" -eq 0 ] && cmp -s "$AGENT/agents/reviewer.md" "$REPO/pi/agents/reviewer.md"; then
+  pass "backup: --overwrite-repo-edits discards the repository edit and copies live"
+else
+  fail "backup: --overwrite-repo-edits did not complete (rc=$rc)"
+fi
+
+# A dirty tree identical to live is benign (previous backup output).
+rc=0
+bash "$BACKUP_SH" >"$WORK/backup-benign.log" 2>&1 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  pass "backup: dirty tree identical to live is not a conflict"
+else
+  fail "backup: benign dirty state blocked the backup (rc=$rc)"
 fi
 
 # ---------------------------------------------------------------- 4. restore round-trip

@@ -41,6 +41,14 @@ git -C ~/Desktop/Projects/pi-harness-config add -A && \
 git -C ~/Desktop/Projects/pi-harness-config push             # requires authorization
 ```
 
+Before copying anything, `backup.sh` checks a Git repository for uncommitted
+edits in live-mirrored paths (`pi/AGENTS.md`, `pi/settings.json`, `pi/agents/`,
+`pi/extensions/`, `pi/skills/`, `mcp/mcp.json`, `shared-skills/`, …). If such a
+file differs from its live counterpart, the backup aborts instead of
+destroying it; a dirty tree identical to live (the previous backup's own
+output) is allowed. `--overwrite-repo-edits` discards the conflicting edits
+deliberately.
+
 Restore on a new machine (after installing Pi itself; clone the repo first,
 because the live `~/.pi/agent/skills/...` path only exists after a restore):
 
@@ -79,9 +87,12 @@ current snapshot metadata is refreshed — the README backup-time line in place,
 `pi/settings.json` through the normal copy. Drift alone never fails a backup.
 Blocking inconsistencies abort before the repository is touched: runtime Pi
 version vs the managed marker, installed TruffleHog vs the pinned version,
-installed Obscura vs the lock, a floating or mismatched package pin (DCP or
-any declared npm/git source), malformed lock metadata, or an undiscoverable
-required component. A final post-copy pass verifies that the
+installed Obscura vs the lock, a non-exact or mismatched package declaration
+(an npm range or tag, a floating git ref, a bare GitHub URL, or a live install
+that disagrees with its pin), malformed lock metadata, or an undiscoverable
+required component. The same exact-pin invariant is enforced by
+`scripts/check-repo.sh` after the copy, but the preflight makes the failure
+pre-copy. A final post-copy pass verifies that the
 snapshot describes the live Pi version and runs the repository contract.
 
 When Pi itself has changed since the previous snapshot, backup also runs the

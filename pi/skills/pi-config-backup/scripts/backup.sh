@@ -12,6 +12,12 @@
 # file is copied. The snapshot must describe what is actually installed;
 # backup never trusts the previously recorded Pi version, never checks
 # upstream for newer releases, and never upgrades anything.
+#
+# GUARD: a Git repository with uncommitted edits in live-mirrored paths
+# whose content differs from the live config aborts before any copy
+# (--overwrite-repo-edits discards them deliberately).
+#
+# Usage: backup.sh [--overwrite-repo-edits]
 # ============================================================
 set -euo pipefail
 
@@ -24,6 +30,15 @@ SHARED_SKILLS_SRC="$HOME/.agents/skills"
 log()  { printf 'backup: %s\n' "$*"; }
 fail() { printf 'backup: ERROR: %s\n' "$*" >&2; exit 1; }
 
+ALLOW_OVERWRITE_REPO_EDITS=0
+for arg in "$@"; do
+  case "$arg" in
+    --overwrite-repo-edits) ALLOW_OVERWRITE_REPO_EDITS=1 ;;
+    -h|--help) printf 'usage: backup.sh [--overwrite-repo-edits]\n'; exit 0 ;;
+    *) echo "backup: unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
+
 [ -d "$AGENT_DIR" ] || fail "Pi agent dir missing: $AGENT_DIR"
 
 # Safety: never allow the destination inside a live config tree.
@@ -31,6 +46,55 @@ case "$REPO_DIR" in
   "$AGENT_DIR"|"$AGENT_DIR"/*) fail "refusing: repo dir is inside the live Pi agent dir ($REPO_DIR)" ;;
   "$HOME/.agents"|"$HOME/.agents"/*) fail "refusing: repo dir is inside the live shared skills dir ($REPO_DIR)" ;;
 esac
+
+# --- 0a. Repository overwrite guard ---------------------------
+# The copy phase mirrors the live config over the repository. Refuse to
+# destroy uncommitted repository content in live-mirrored paths that differs
+# from its live counterpart; a benign dirty tree (previous backup output,
+# already identical to live) is allowed. --overwrite-repo-edits bypasses it.
+repo_mirror_live_path() { # <repo-relative-path> -> live path, or return 1
+  case "$1" in
+    pi/AGENTS.md|pi/settings.json|pi/keybindings.json|pi/patch-pi-renderer.py|pi/logo.png|pi/dcp.jsonc|pi/pi-lsp.json|pi/agents/*|pi/extensions/*|pi/themes/*|pi/skills/*)
+      printf '%s' "$AGENT_DIR/${1#pi/}" ;;
+    mcp/mcp.json)
+      printf '%s' "$MCP_SRC" ;;
+    shared-skills/*)
+      printf '%s' "$SHARED_SKILLS_SRC/${1#shared-skills/}" ;;
+    *)
+      return 1 ;;
+  esac
+}
+
+repo_dirty_mirrored_files() { # <repo> <pathspec...> -> NUL-separated paths
+  local repo="$1"
+  shift
+  if git -C "$repo" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+    git -C "$repo" diff --name-only -z HEAD -- "$@"
+  fi
+  git -C "$repo" ls-files --others --exclude-standard -z -- "$@"
+}
+
+if [ "$ALLOW_OVERWRITE_REPO_EDITS" != 1 ] && git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  MIRRORED_PATHS=(pi/AGENTS.md pi/settings.json pi/keybindings.json pi/patch-pi-renderer.py \
+    pi/logo.png pi/dcp.jsonc pi/pi-lsp.json pi/agents pi/extensions pi/themes pi/skills \
+    mcp/mcp.json shared-skills)
+  repo_conflicts=()
+  while IFS= read -r -d '' rel; do
+    [ -n "$rel" ] || continue
+    live="$(repo_mirror_live_path "$rel")" || continue
+    if [ ! -f "$REPO_DIR/$rel" ] || [ ! -f "$live" ] || ! cmp -s "$REPO_DIR/$rel" "$live"; then
+      repo_conflicts+=("$rel")
+    fi
+  done < <(repo_dirty_mirrored_files "$REPO_DIR" "${MIRRORED_PATHS[@]}")
+  if [ "${#repo_conflicts[@]}" -gt 0 ]; then
+    {
+      printf 'backup: ERROR: repository has local edits in live-mirrored paths that differ from the live config:\n'
+      printf '          %s\n' "${repo_conflicts[@]}"
+      printf 'backup: ERROR: sync them to the live config, or re-run with --overwrite-repo-edits to discard them.\n'
+    } >&2
+    exit 1
+  fi
+fi
 
 # --- 0. Live version preflight (must precede any copy) --------
 # Discover what is actually installed, compare it with the repository

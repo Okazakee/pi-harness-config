@@ -102,6 +102,9 @@ must never be committed.
   Confirm visibility before pushing:
   `gh repo view Okazakee/pi-harness-config --json visibility`.
 - Never force-push or rewrite history in the backup repo.
+- The backup refuses to overwrite uncommitted repository edits in
+  live-mirrored paths that differ from the live config. Sync them to the live
+  config, or pass `--overwrite-repo-edits` deliberately.
 
 ## Pinned packages
 
@@ -109,6 +112,8 @@ must never be committed.
 version and every `git:` entry an exact commit. The version preflight blocks
 the backup when an installed package or checkout does not match its pin, so a
 restore rebuilds the pinned graph instead of pulling new upstream releases.
+A declaration that is not exactly pinned (an npm range, an unpinned URL, a
+floating ref) also blocks before anything is copied.
 
 To move a pin deliberately: edit `packages` in `~/.pi/agent/settings.json` and
 run `pi update --extensions` (this reconciles pinned git refs). A changed npm

@@ -108,6 +108,8 @@ import re
 import sys
 
 GIT_PIN = re.compile(r"^git:github\.com/[\w.-]+/[\w.-]+@[0-9a-f]{40}$")
+# NPM_PIN mirrors versions_npm_pin_is_exact() in
+# pi/skills/pi-config-backup/scripts/versions-lib.sh — keep them in sync.
 NPM_PIN = re.compile(r"^npm:(?:@[\w.-]+/)?[\w.-]+@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 URL_PIN = re.compile(r"^https://github\.com/[\w.-]+/[\w.-]+(?:\.git)?@[0-9a-f]{40}$")
 try:
