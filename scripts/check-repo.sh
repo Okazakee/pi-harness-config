@@ -101,13 +101,15 @@ PY
   fi
 fi
 
-# ---------------------------------------------------------------- 3. DCP pin
+# ------------------------------------------------- 3. Package pin invariant
 dcp_report="$(python3 - <<'PY'
 import json
 import re
 import sys
 
-PIN = re.compile(r"^git:github\.com/[\w.-]+/[\w.-]+@[0-9a-f]{40}$")
+GIT_PIN = re.compile(r"^git:github\.com/[\w.-]+/[\w.-]+@[0-9a-f]{40}$")
+NPM_PIN = re.compile(r"^npm:(?:@[\w.-]+/)?[\w.-]+@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+URL_PIN = re.compile(r"^https://github\.com/[\w.-]+/[\w.-]+(?:\.git)?@[0-9a-f]{40}$")
 try:
     settings = json.load(open("pi/settings.json", encoding="utf-8"))
 except Exception as exc:  # noqa: BLE001
@@ -123,19 +125,25 @@ dcp = [p for p in packages if isinstance(p, str) and "pi-dcp" in p]
 if not dcp:
     print("no pi-dcp entry in pi/settings.json packages")
 for entry in dcp:
-    if not PIN.match(entry):
+    if not GIT_PIN.match(entry):
         print(f"pi-dcp is not pinned to an exact commit: {entry}")
 
 for entry in packages:
-    if isinstance(entry, str) and entry.startswith("git:") and not PIN.match(entry):
+    if not isinstance(entry, str):
+        continue
+    if entry.startswith("git:") and not GIT_PIN.match(entry):
         print(f"git package is not pinned to an exact commit: {entry}")
+    if entry.startswith("npm:") and not NPM_PIN.match(entry):
+        print(f"npm package is not pinned to an exact version: {entry}")
+    if entry.startswith(("http://", "https://")) and not URL_PIN.match(entry):
+        print(f"URL package is not pinned to an exact commit: {entry}")
 PY
 )"
 if [ -n "$dcp_report" ]; then
-  fail "DCP/pinned-git package invariant:"
+  fail "package pin invariant (DCP/npm/git/URL):"
   printf '%s\n' "$dcp_report" | sed 's/^/          /' >&2
 else
-  ok "DCP package pinned to an exact commit"
+  ok "all declared packages are exactly pinned (DCP, npm, git, URL)"
 fi
 
 # ---------------------------------------------------------------- 4. Obscura lock

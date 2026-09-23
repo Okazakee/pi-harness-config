@@ -192,20 +192,94 @@ versions_git_head() { # <checkout_dir>
 
 # ---------------------------------------------------------------- discovery
 
-# Classify one git/npm package spec. Fills the row and, for pinned git
-# sources, verifies the installed checkout against the pin.
+# Split an npm spec body (`[@scope/]name[@version]`) into a package name and
+# an optional version. Scoped names start with '@', so only a second '@'
+# delimits a version.
+versions_split_npm_spec() { # <spec-body>; sets VERSIONS_NPM_NAME / VERSIONS_NPM_PIN
+  local body="$1" rest=""
+  VERSIONS_NPM_NAME="$body"
+  VERSIONS_NPM_PIN=""
+  case "$body" in
+    @*@*)
+      rest="${body#@}"
+      VERSIONS_NPM_NAME="@${rest%@*}"
+      VERSIONS_NPM_PIN="${body##*@}"
+      ;;
+    @*) ;;
+    *@*)
+      VERSIONS_NPM_NAME="${body%@*}"
+      VERSIONS_NPM_PIN="${body##*@}"
+      ;;
+  esac
+}
+
+# Exact semver only (Pi's npm pin semantics): reject tags, ranges and
+# caret/tilde/x-ranges so they classify as floating instead of blocking.
+versions_npm_pin_is_exact() { # <version>
+  case "$1" in
+    [0-9]*.[0-9]*.[0-9]*) ;;
+    *) return 1 ;;
+  esac
+  case "$1" in
+    *[!0-9A-Za-z.+-]*) return 1 ;;
+  esac
+  return 0
+}
+
+# Verify a commit-pinned git source (git: prefix or github URL with @ref).
+# Fills the row from the installed checkout and blocks on any mismatch.
+versions_discover_git_pin() { # <agent_dir> <owner_repo> <pin> <spec>
+  local agent_dir="$1" owner_repo="$2" pin="$3" spec="$4"
+  case "$pin" in
+    ""|"$spec"|*[!0-9a-f]*)
+      versions_block "git package is not pinned to an exact commit: $spec"
+      versions_row "git:$owner_repo" "floating" "-" BLOCK "no 40-hex commit pin"
+      return 0
+      ;;
+  esac
+  if [ "${#pin}" -ne 40 ]; then
+    versions_block "git package pin is not a 40-hex commit: $spec"
+    versions_row "git:$owner_repo" "$pin" "$pin" BLOCK "invalid pin"
+    return 0
+  fi
+  local checkout="$agent_dir/git/$owner_repo" commit="" rc=0
+  commit="$(versions_git_head "$checkout" 2>/dev/null)" || rc=$?
+  if [ "$rc" -eq 3 ]; then
+    versions_row "git:$owner_repo" "missing" "$pin" MISSING "checkout not found"
+  elif [ -z "$commit" ]; then
+    versions_block "could not read installed commit for git package $owner_repo"
+    versions_row "git:$owner_repo" "unknown" "$pin" BLOCK "unreadable checkout"
+  elif [ "$commit" != "$pin" ]; then
+    versions_block "git package $owner_repo installed at $commit but pinned to $pin"
+    versions_row "git:$owner_repo" "$commit" "$pin" BLOCK "installed != pinned"
+  else
+    versions_row "git:$owner_repo" "$commit" "$pin" OK "pinned commit"
+  fi
+}
+
+# Classify one git/npm package spec. Fills the row; pinned npm versions and
+# pinned git refs are verified against the live install and block on drift.
 versions_discover_package() { # <agent_dir> <repo_dir> <spec>
   local agent_dir="$1" repo_dir="$2" spec="$3"
   case "$spec" in
     npm:*)
-      local pkg="${spec#npm:}" installed="" rc=0
+      local body="${spec#npm:}" pkg="" pin="" installed="" rc=0
+      versions_split_npm_spec "$body"
+      pkg="$VERSIONS_NPM_NAME"
+      pin="$VERSIONS_NPM_PIN"
+      versions_npm_pin_is_exact "$pin" || pin=""
       installed="$(versions_npm_installed_version "$agent_dir" "$pkg" 2>/dev/null)" || rc=$?
       if [ "$rc" -eq 3 ]; then
-        versions_row "npm:$pkg" "missing" "-" MISSING "declared in settings.json"
-      elif [ -n "$installed" ]; then
-        versions_row "npm:$pkg" "$installed" "-" OK "installed"
+        versions_row "npm:$pkg" "missing" "${pin:--}" MISSING "declared in settings.json"
+      elif [ -z "$installed" ]; then
+        versions_row "npm:$pkg" "unknown" "${pin:--}" MISSING "unreadable package.json"
+      elif [ -n "$pin" ] && [ "$installed" != "$pin" ]; then
+        versions_block "npm package $pkg installed at $installed but pinned to $pin"
+        versions_row "npm:$pkg" "$installed" "$pin" BLOCK "installed != pinned"
+      elif [ -n "$pin" ]; then
+        versions_row "npm:$pkg" "$installed" "$pin" OK "pinned version"
       else
-        versions_row "npm:$pkg" "unknown" "-" MISSING "unreadable package.json"
+        versions_row "npm:$pkg" "$installed" "-" OK "installed"
       fi
       ;;
     git:*)
@@ -215,41 +289,27 @@ versions_discover_package() { # <agent_dir> <repo_dir> <spec>
       pin="${spec##*@}"
       repo_path="${spec#git:}"
       owner_repo="${repo_path%@*}"
-      case "$pin" in
-        ""|"$spec"|*[!0-9a-f]*)
-          versions_block "git package is not pinned to an exact commit: $spec"
-          versions_row "git:$owner_repo" "floating" "-" BLOCK "no 40-hex commit pin"
-          return 0
-          ;;
-      esac
-      if [ "${#pin}" -ne 40 ]; then
-        versions_block "git package pin is not a 40-hex commit: $spec"
-        versions_row "git:$owner_repo" "$pin" "$pin" BLOCK "invalid pin"
-        return 0
-      fi
-      local checkout="$agent_dir/git/$owner_repo" commit="" rc=0
-      commit="$(versions_git_head "$checkout" 2>/dev/null)" || rc=$?
-      if [ "$rc" -eq 3 ]; then
-        versions_row "git:$owner_repo" "missing" "$pin" MISSING "checkout not found"
-      elif [ -z "$commit" ]; then
-        versions_block "could not read installed commit for git package $owner_repo"
-        versions_row "git:$owner_repo" "unknown" "$pin" BLOCK "unreadable checkout"
-      elif [ "$commit" != "$pin" ]; then
-        versions_block "git package $owner_repo installed at $commit but pinned to $pin"
-        versions_row "git:$owner_repo" "$commit" "$pin" BLOCK "installed != pinned"
-      else
-        versions_row "git:$owner_repo" "$commit" "$pin" OK "pinned commit"
-      fi
+      versions_discover_git_pin "$agent_dir" "$owner_repo" "$pin" "$spec"
       ;;
     http://*|https://*)
-      local owner_repo="${spec#*github.com/}"
-      owner_repo="${owner_repo%.git}"
-      local checkout="$agent_dir/git/github.com/$owner_repo" commit="" rc=0
-      commit="$(versions_git_head "$checkout" 2>/dev/null)" || rc=$?
-      if [ "$rc" -eq 3 ]; then
-        versions_row "git:$owner_repo" "missing" "-" MISSING "checkout not found"
+      local owner_repo="${spec#*github.com/}" pin=""
+      case "$owner_repo" in
+        *@*)
+          pin="${owner_repo##*@}"
+          owner_repo="${owner_repo%@*}"
+          ;;
+      esac
+      owner_repo="github.com/${owner_repo%.git}"
+      if [ -n "$pin" ]; then
+        versions_discover_git_pin "$agent_dir" "$owner_repo" "$pin" "$spec"
       else
-        versions_row "git:$owner_repo" "${commit:-unknown}" "-" OK "unpinned source (not a contract pin)"
+        local checkout="$agent_dir/git/$owner_repo" commit="" rc=0
+        commit="$(versions_git_head "$checkout" 2>/dev/null)" || rc=$?
+        if [ "$rc" -eq 3 ]; then
+          versions_row "git:$owner_repo" "missing" "-" MISSING "checkout not found"
+        else
+          versions_row "git:$owner_repo" "${commit:-unknown}" "-" OK "unpinned source (not a contract pin)"
+        fi
       fi
       ;;
     *)
@@ -523,7 +583,7 @@ versions_compare_snapshot() { # <repo_dir>
   if [ "$changes" -eq 0 ]; then
     printf 'no changes since the last successful backup\n'
   fi
-  printf '(unpinned components are informational; hard pins are checked separately)\n'
+  printf '(component changes are informational; all declared pins are enforced by the live preflight above)\n'
   return 0
 }
 
