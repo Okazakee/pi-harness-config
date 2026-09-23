@@ -43,11 +43,18 @@ git -C ~/Desktop/Projects/pi-harness-config add -A && \
 git -C ~/Desktop/Projects/pi-harness-config push             # requires authorization
 ```
 
-Restore on a new machine (after installing Pi itself):
+Restore on a new machine (after installing Pi itself, clone the repo first —
+the live `~/.pi/agent/skills/...` path only exists after a restore):
 
 ```bash
-bash ~/.pi/agent/skills/pi-config-backup/scripts/restore.sh
+git clone git@github.com:Okazakee/pi-harness-config.git ~/Desktop/Projects/pi-harness-config
+bash ~/Desktop/Projects/pi-harness-config/pi/skills/pi-config-backup/scripts/restore.sh
 ```
+
+Pi package declarations in `pi/settings.json` are exact pins (npm versions and
+git commits), so a restore rebuilds the pinned extension graph; `pi/versions.json`
+additionally records observed toolchain versions. Deliberately moving a pin is
+documented in [`docs/reproducibility.md`](docs/reproducibility.md).
 
 Flags: `--yes` (no prompt), `--no-packages`, `--no-obscura`, `--no-patch`.
 Restore still requires installing Pi and running `pi login` by hand. Details,

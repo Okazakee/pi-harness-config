@@ -26,9 +26,9 @@ not listed here are intentionally excluded.
 | `~/.pi/agent/auth.json` | OAuth tokens and API keys — secret |
 | `~/.pi/agent/sessions/` | Conversation history — sensitive runtime state |
 | `~/.pi/agent/install/` | Installed Pi releases — reinstall |
-| `~/.pi/agent/npm/` | Installed npm packages — reinstall from `settings.json` |
+| `~/.pi/agent/npm/` | Installed npm packages — reinstalled from the exact pins in `settings.json` |
 | `~/.pi/agent/bin/` | Downloaded helper binaries (fd, rg) — auto-downloaded |
-| `~/.pi/agent/git/` | Git package cache — re-cloned |
+| `~/.pi/agent/git/` | Git package cache — re-cloned at the exact commits pinned in `settings.json` |
 | `~/.pi/agent/models-store.json` | Regenerable model catalog cache |
 | `~/.pi/agent/mcp-cache.json` | Regenerable MCP tool-metadata cache |
 | `~/.local/bin/obscura`, `obscura-worker` | obscura MCP browser binaries — reinstalled by `restore.sh` from the exact release pinned in `deps/obscura.lock.json` (SHA-256 verified before extraction) |
@@ -48,7 +48,7 @@ counterpart to restore.
 | `.githooks/` | Tracked `pre-commit` and `pre-push` validators. Activated per clone with `scripts/install-hooks.sh` (or automatically by `restore.sh` when restoring into a Git checkout). |
 | `scripts/` | Repository checks, secret scanning, pinned installers, the Obscura lock updater, and the isolated test scripts. |
 | `docs/` | Scoped repository documentation: this provenance map, extensions/context management, backup and restore, reproducibility, and repository integrity. Repo-only; no live counterpart. |
-| `pi/versions.json` | Generated, non-secret inventory of the live harness versions/revisions observed during the last **successful** backup (Pi, tools, direct npm packages, git checkouts, runtimes). A historical snapshot for drift reporting, **not** a lock file: hard pins stay in `deps/*.lock.json` and `pi/settings.json`, and it is never copied into `~/.pi/agent` nor used by `restore.sh`. Refreshed by `backup.sh` only after verification succeeds. |
+| `pi/versions.json` | Generated, non-secret inventory of the live harness versions/revisions observed during the last **successful** backup (Pi, tools, direct npm packages, git checkouts, runtimes). A historical snapshot for drift reporting, **not** a lock file: hard pins stay in `deps/*.lock.json` and in the exact versions/commits declared in `pi/settings.json`, and it is never copied into `~/.pi/agent` nor used by `restore.sh`. Refreshed by `backup.sh` only after verification succeeds. |
 | `systemd/` | `systemd --user` path unit + service that re-apply `pi/patch-pi-renderer.py` whenever the managed Pi version changes. Installed by `scripts/install-renderer-guard.sh` into `~/.config/systemd/user/`; not part of the config backup. |
 | `.github/workflows/verify.yml` | Independent CI verification. Actions pinned to exact commit SHAs; runs the same checks as the local hooks. |
 

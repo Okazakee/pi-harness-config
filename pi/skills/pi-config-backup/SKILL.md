@@ -103,15 +103,36 @@ must never be committed.
   `gh repo view Okazakee/pi-harness-config --json visibility`.
 - Never force-push or rewrite history in the backup repo.
 
+## Pinned packages
+
+`pi/settings.json` declares exact pins: every `npm:` entry carries an exact
+version and every `git:` entry an exact commit. The version preflight blocks
+the backup when an installed package or checkout does not match its pin, so a
+restore rebuilds the pinned graph instead of pulling new upstream releases.
+
+To move a pin deliberately: edit `packages` in `~/.pi/agent/settings.json` and
+run `pi update --extensions` (this reconciles pinned git refs). A changed npm
+pin is installed the next time Pi resolves extensions, such as the next
+session start. `pi update --extensions` never upgrades an exact npm pin.
+
 ## Restore
 
+On a fresh machine, clone the backup repo first and run the repository copy of
+the script — the live `~/.pi/agent/skills/...` path only exists after a
+restore:
+
 ```bash
-bash ~/.pi/agent/skills/pi-config-backup/scripts/restore.sh
+git clone git@github.com:Okazakee/pi-harness-config.git ~/Desktop/Projects/pi-harness-config
+bash ~/Desktop/Projects/pi-harness-config/pi/skills/pi-config-backup/scripts/restore.sh
 ```
 
+Afterwards the live `~/.pi/agent/skills/pi-config-backup/scripts/restore.sh`
+can be used again.
+
 Restores config, then best-effort reinstalls the non-config pieces: Pi packages
-(`pi update --extensions`), the `obscura` MCP binary (latest GitHub release for
-the detected platform), and the TUI renderer patch. Backs up existing live
+(`pi update --extensions`; pinned and missing npm packages install at the next
+Pi start), the `obscura` MCP binary (the release and per-platform SHA-256 in
+`deps/obscura.lock.json`), and the TUI renderer patch. Backs up existing live
 config first; never writes `auth.json`.
 
 - Flags: `--yes`, `--no-packages`, `--no-obscura`, `--no-patch`.

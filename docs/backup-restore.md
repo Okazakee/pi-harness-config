@@ -41,17 +41,21 @@ git -C ~/Desktop/Projects/pi-harness-config add -A && \
 git -C ~/Desktop/Projects/pi-harness-config push             # requires authorization
 ```
 
-Restore on a new machine (after installing Pi itself):
+Restore on a new machine (after installing Pi itself; clone the repo first,
+because the live `~/.pi/agent/skills/...` path only exists after a restore):
 
 ```bash
-bash ~/.pi/agent/skills/pi-config-backup/scripts/restore.sh
+git clone git@github.com:Okazakee/pi-harness-config.git ~/Desktop/Projects/pi-harness-config
+bash ~/Desktop/Projects/pi-harness-config/pi/skills/pi-config-backup/scripts/restore.sh
 ```
 
 `restore.sh` restores the config, then best-effort reinstalls the pieces that
-are **not** config: Pi packages (`pi update --extensions`), the `obscura` MCP
-binary (the exact release pinned in `deps/obscura.lock.json`, verified by
-SHA-256 before extraction), and the TUI renderer patch (plus its `systemd
---user` update guard). It backs up any
+are **not** config: Pi packages (exact pins from `pi/settings.json`; `pi
+update --extensions` reconciles pinned git refs, and pinned or missing npm
+packages install at the next Pi start), the `obscura` MCP binary (the exact
+release pinned in `deps/obscura.lock.json`, verified by SHA-256 before
+extraction), and the TUI renderer patch (plus its `systemd --user` update
+guard). It backs up any
 existing live config first, never touches `auth.json`, and activates the
 tracked Git hooks when it is restoring into a real Git checkout.
 
@@ -62,9 +66,10 @@ tracked Git hooks when it is restoring into a real Git checkout.
 
 Every backup starts by discovering the live versions/revisions of the harness
 — Pi (runtime plus the managed `install/current-version` marker, which must
-agree), RTK, every declared Pi package (`npm:` versions, `git:` commit pins),
-DCP's pinned commit, Obscura (installed vs `deps/obscura.lock.json`),
-TruffleHog (installed vs `deps/tools.lock.json`), Bun and Node. Discovery is
+agree), RTK, every declared Pi package (exact `npm:` versions and `git:`
+commit pins, each checked against the live install), Obscura (installed vs
+`deps/obscura.lock.json`), TruffleHog (installed vs `deps/tools.lock.json`),
+Bun and Node. Discovery is
 local and offline: it reads local binaries, settings, lock files and git
 checkouts, never the network.
 
@@ -74,8 +79,9 @@ current snapshot metadata is refreshed — the README backup-time line in place,
 `pi/settings.json` through the normal copy. Drift alone never fails a backup.
 Blocking inconsistencies abort before the repository is touched: runtime Pi
 version vs the managed marker, installed TruffleHog vs the pinned version,
-installed Obscura vs the lock, a floating DCP pin, malformed lock metadata, or
-an undiscoverable required component. A final post-copy pass verifies that the
+installed Obscura vs the lock, a floating or mismatched package pin (DCP or
+any declared npm/git source), malformed lock metadata, or an undiscoverable
+required component. A final post-copy pass verifies that the
 snapshot describes the live Pi version and runs the repository contract.
 
 When Pi itself has changed since the previous snapshot, backup also runs the
@@ -86,12 +92,12 @@ yet restored live), and the `cwd-switch`/`todo` suites when Bun is available.
 
 The preflight also compares the live inventory with `pi/versions.json`, the
 snapshot of the last **successful** backup. Unpinned component changes (RTK,
-Pi npm extensions, git sources, Bun/Node) are reported as `~ old → new`,
-`+ added`, or `- removed` but never block — they are history, not
-requirements. The snapshot is replaced only after the copy and every
-verification step succeeds, so a failed backup never advances it; the first
-coherent backup reports a baseline instead of fake drift. Hard locks and pins
-(`deps/*.lock.json`, the DCP commit) remain the only things that block, and
+Bun/Node) are reported as `~ old → new`, `+ added`, or `- removed` but never
+block — they are history, not requirements. The snapshot is replaced only
+after the copy and every verification step succeeds, so a failed backup never
+advances it; the first coherent backup reports a baseline instead of fake
+drift. Hard locks and pins (`deps/*.lock.json`, every exact npm version and
+git commit declared in `pi/settings.json`) block on any mismatch, and
 `pi/versions.json` is never used to install anything.
 
 Backup never checks upstream for newer releases and never upgrades any

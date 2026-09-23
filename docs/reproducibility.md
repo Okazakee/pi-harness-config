@@ -1,5 +1,32 @@
 # Reproducibility
 
+## Pi extension and git-source pins
+
+`pi/settings.json` is the authoritative pin declaration for Pi's dependency
+graph: every `npm:` entry carries an exact version and every `git:` entry an
+exact commit. `scripts/check-repo.sh` fails when any declared source is not
+exactly pinned.
+
+Pi treats versioned npm specifications as fixed. `pi update --extensions`
+never moves them, and a missing or mismatched install is reconciled to the
+pinned version when Pi resolves extension packages — any session start, or an
+explicit `pi update --extensions` for missing packages. Pinned git refs are
+checked out from the configured commit, and `pi update --extensions`
+re-fetches them, so a deliberately changed pin is applied without ever
+following an upstream branch.
+
+`pi/versions.json` remains a historical inventory, not an installation lock
+file, but with the declarations pinned it mirrors the declared graph instead
+of drifting away from it.
+
+### Updating a package pin
+
+1. Edit the exact version or commit in `~/.pi/agent/settings.json`.
+2. Run `pi update --extensions` (reconciles pinned git refs); a changed npm
+   pin is installed the next time Pi resolves extensions.
+3. Run the backup; the version preflight blocks until the installed graph
+   matches the pins again.
+
 ## Reproducibility (pinned dependencies)
 
 Obscura is **version pinned, asset pinned, and SHA-256 verified before

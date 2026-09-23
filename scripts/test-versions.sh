@@ -255,6 +255,27 @@ discover
 expect_status "DCP pin/commit mismatch is BLOCK" "git:github.com/PSU3D0/pi-dcp" "BLOCK"
 expect_blocked "DCP pin/commit mismatch blocks backup"
 
+new_case
+sha="$(make_checkout ayghri/i-have-adhd)"
+write_live_settings "[\"https://github.com/ayghri/i-have-adhd@$sha\"]"
+discover
+expect_status "URL git source pinned to a commit verifies the checkout" "git:github.com/ayghri/i-have-adhd" "OK"
+expect_clear "URL commit pin does not block"
+
+new_case
+make_checkout ayghri/i-have-adhd >/dev/null
+write_live_settings '["https://github.com/ayghri/i-have-adhd@0000000000000000000000000000000000000000"]'
+discover
+expect_status "URL commit pin mismatch is BLOCK" "git:github.com/ayghri/i-have-adhd" "BLOCK"
+expect_blocked "URL commit pin mismatch blocks backup"
+
+new_case
+make_checkout ayghri/i-have-adhd >/dev/null
+write_live_settings '["https://github.com/ayghri/i-have-adhd@main"]'
+discover
+expect_status "URL branch ref is not an exact pin" "git:github.com/ayghri/i-have-adhd" "BLOCK"
+expect_blocked "URL branch ref blocks backup"
+
 # ---------------------------------------------------------------- npm packages
 new_case
 mkdir -p "$AGENT/npm/node_modules/@narumitw/pi-goal"
@@ -263,6 +284,57 @@ write_live_settings '["npm:@narumitw/pi-goal"]'
 discover
 expect_status "npm package version is discovered" "npm:@narumitw/pi-goal" "OK"
 expect_clear "npm package discovery does not block"
+
+new_case
+mkdir -p "$AGENT/npm/node_modules/@narumitw/pi-goal"
+printf '{ "version": "0.54.8" }' >"$AGENT/npm/node_modules/@narumitw/pi-goal/package.json"
+write_live_settings '["npm:@narumitw/pi-goal@0.54.8"]'
+discover
+expect_status "pinned npm version matching the install is OK" "npm:@narumitw/pi-goal" "OK"
+expect_clear "pinned npm version match does not block"
+
+new_case
+mkdir -p "$AGENT/npm/node_modules/@narumitw/pi-goal"
+printf '{ "version": "0.55.0" }' >"$AGENT/npm/node_modules/@narumitw/pi-goal/package.json"
+write_live_settings '["npm:@narumitw/pi-goal@0.54.8"]'
+discover
+expect_status "pinned npm version mismatch is BLOCK" "npm:@narumitw/pi-goal" "BLOCK"
+expect_blocked "pinned npm version mismatch blocks backup"
+
+new_case
+mkdir -p "$AGENT/npm/node_modules/pi-mcp-adapter"
+printf '{ "version": "2.36.0" }' >"$AGENT/npm/node_modules/pi-mcp-adapter/package.json"
+write_live_settings '["npm:pi-mcp-adapter@2.36.0"]'
+discover
+expect_status "unscoped pinned npm version is parsed" "npm:pi-mcp-adapter" "OK"
+expect_clear "unscoped pinned npm version does not block"
+
+new_case
+write_live_settings '["npm:@narumitw/pi-goal@0.54.8"]'
+discover
+expect_status "pinned npm package that is not installed is MISSING" "npm:@narumitw/pi-goal" "MISSING"
+expect_clear "missing pinned npm package does not block backup"
+
+new_case
+mkdir -p "$AGENT/npm/node_modules/@narumitw/pi-goal"
+printf '{ "version": "0.55.0" }' >"$AGENT/npm/node_modules/@narumitw/pi-goal/package.json"
+write_live_settings '["npm:@narumitw/pi-goal@^0.54.8"]'
+discover
+expect_status "npm range spec stays informational (not a pin)" "npm:@narumitw/pi-goal" "OK"
+expect_clear "npm range spec does not block"
+
+new_case
+mkdir -p "$AGENT/npm/node_modules/@narumitw/pi-goal"
+printf '{ "version": "0.54.8" }' >"$AGENT/npm/node_modules/@narumitw/pi-goal/package.json"
+sha="$(make_checkout ayghri/i-have-adhd)"
+write_live_settings "[\"npm:@narumitw/pi-goal@0.54.8\",\"https://github.com/ayghri/i-have-adhd@$sha\"]"
+discover
+staged="$(versions_snapshot_stage "$REPO")" && versions_snapshot_commit "$staged" "$REPO"
+if python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d["packages"]["@narumitw/pi-goal"]=="0.54.8" and d["git"]["i-have-adhd"]==sys.argv[2] else 1)' "$REPO/pi/versions.json" "$sha" 2>/dev/null; then
+  pass "snapshot: pinned npm and URL refs record under stable keys"
+else
+  fail "snapshot: pinned entries recorded incorrectly"
+fi
 
 # ---------------------------------------------------------------- stale refs
 new_case

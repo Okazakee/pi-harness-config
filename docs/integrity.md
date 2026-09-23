@@ -69,6 +69,13 @@ scripts/test-todo.sh               # /todo extension unit + wiring tests
 scripts/test-versions.sh           # version drift and preflight logic
 ```
 
+The repository contract also enforces the dependency pin invariant: every
+`npm:` entry in `pi/settings.json` must carry an exact version, every `git:`
+entry an exact 40-hex commit, and every GitHub URL an exact commit ref. Pi
+extensions execute with the user's permissions, so a declared source that
+floats would let a restore resolve to whatever upstream published; the
+contract fails instead of allowing that.
+
 `scripts/test-todo.sh` additionally runs one optional smoke test against the
 installed Pi loader when a `pi` binary is on `PATH`: it copies the extension
 entrypoint and its helper directory into an isolated temporary
