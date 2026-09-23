@@ -8,6 +8,12 @@ exact commit. A declaration that is not exactly pinned blocks the backup in
 the live preflight, before any file is copied, and `scripts/check-repo.sh`
 enforces the same invariant on the repository afterwards.
 
+Accepted source classes are exact `npm:` versions, pinned
+`git:github.com/...@<40-hex>` and pinned `https://github.com/...@<40-hex>`.
+Pi's object form (`{"source": "..."}`) is normalized to its source; local
+paths and other protocols (`ssh://`, `git://`, non-GitHub hosts) fail closed
+as non-portable.
+
 Pi treats versioned npm specifications as fixed. `pi update --extensions`
 never moves them, and a missing or mismatched install is reconciled to the
 pinned version when Pi resolves extension packages — any session start, or an

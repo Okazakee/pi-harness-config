@@ -123,22 +123,44 @@ if not isinstance(packages, list):
     print("pi/settings.json has no packages array")
     sys.exit(0)
 
-dcp = [p for p in packages if isinstance(p, str) and "pi-dcp" in p]
+
+def package_source(entry):
+    """Normalize a Pi package declaration to its source string, or None."""
+    if isinstance(entry, str) and entry.strip():
+        return entry.strip()
+    if isinstance(entry, dict):
+        source = entry.get("source")
+        if isinstance(source, str) and source.strip():
+            return source.strip()
+    return None
+
+
+sources = [package_source(p) for p in packages]
+for entry in packages:
+    if package_source(entry) is None:
+        print(f"package entry is not a supported string or object-with-source declaration: {entry!r}")
+
+dcp = [s for s in sources if s is not None and "pi-dcp" in s]
 if not dcp:
     print("no pi-dcp entry in pi/settings.json packages")
-for entry in dcp:
-    if not GIT_PIN.match(entry):
-        print(f"pi-dcp is not pinned to an exact commit: {entry}")
+for source in dcp:
+    if not GIT_PIN.match(source):
+        print(f"pi-dcp is not pinned to an exact commit: {source}")
 
-for entry in packages:
-    if not isinstance(entry, str):
+for source in sources:
+    if source is None:
         continue
-    if entry.startswith("git:") and not GIT_PIN.match(entry):
-        print(f"git package is not pinned to an exact commit: {entry}")
-    if entry.startswith("npm:") and not NPM_PIN.match(entry):
-        print(f"npm package is not pinned to an exact version: {entry}")
-    if entry.startswith(("http://", "https://")) and not URL_PIN.match(entry):
-        print(f"URL package is not pinned to an exact commit: {entry}")
+    if source.startswith("git:"):
+        if not GIT_PIN.match(source):
+            print(f"git package is not pinned to an exact commit: {source}")
+    elif source.startswith("npm:"):
+        if not NPM_PIN.match(source):
+            print(f"npm package is not pinned to an exact version: {source}")
+    elif source.startswith("https://"):
+        if not URL_PIN.match(source):
+            print(f"URL package is not pinned to an exact commit: {source}")
+    else:
+        print(f"package source is not a supported portable class (exact npm, pinned github git:/https): {source}")
 PY
 )"
 if [ -n "$dcp_report" ]; then
@@ -295,50 +317,13 @@ fi
 # successful backup. Validate its shape only; live comparison happens at
 # backup time, never in CI.
 SNAPSHOT_FILE="pi/versions.json"
+SCHEMA_CHECK="scripts/check-versions-schema.py"
 if [ ! -f "$SNAPSHOT_FILE" ]; then
   fail "$SNAPSHOT_FILE is missing — run a successful backup to bootstrap the version inventory"
+elif [ ! -f "$SCHEMA_CHECK" ]; then
+  fail "missing version snapshot schema validator: $SCHEMA_CHECK"
 else
-  snapshot_report="$(python3 - "$SNAPSHOT_FILE" <<'PY'
-import json
-import re
-import sys
-
-path = sys.argv[1]
-problems = []
-try:
-    data = json.load(open(path, encoding="utf-8"))
-except Exception as exc:  # noqa: BLE001
-    print(f"invalid JSON: {exc}")
-    sys.exit(0)
-
-if not isinstance(data, dict):
-    print("top level must be an object")
-    sys.exit(0)
-if data.get("schemaVersion") != 1:
-    problems.append("schemaVersion must be 1")
-pi = data.get("pi")
-if not isinstance(pi, str) or not re.fullmatch(r"\d+\.\d+\.\d+", pi):
-    problems.append(f"pi must be a semver string, got {pi!r}")
-for section in ("tools", "packages", "git", "runtime"):
-    value = data.get(section)
-    if not isinstance(value, dict):
-        problems.append(f"{section} must be an object")
-        continue
-    for name, entry in value.items():
-        if section == "git":
-            if not isinstance(entry, str) or not re.fullmatch(r"[0-9a-f]{40}", entry):
-                problems.append(f"git.{name} must be a full 40-hex SHA")
-        elif not isinstance(entry, str) or not re.fullmatch(r"\d+\.\d+\.\d+", entry):
-            problems.append(f"{section}.{name} must be a semver string")
-
-text = open(path, encoding="utf-8").read()
-if re.search(r"(sk-[A-Za-z0-9]{16,}|gho_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|BEGIN [A-Z ]*PRIVATE KEY)", text):
-    problems.append("looks like secret material")
-
-for problem in problems:
-    print(problem)
-PY
-)"
+  snapshot_report="$(python3 "$SCHEMA_CHECK" "$SNAPSHOT_FILE")"
   if [ -n "$snapshot_report" ]; then
     fail "$SNAPSHOT_FILE is invalid:"
     printf '%s\n' "$snapshot_report" | sed 's/^/          /' >&2

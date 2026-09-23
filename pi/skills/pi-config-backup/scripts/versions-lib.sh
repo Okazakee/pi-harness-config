@@ -153,6 +153,11 @@ PY
 }
 
 # Print one package source spec per line from settings.json packages[].
+# String entries and Pi's object form ({"source": "..."}) are normalized to
+# their source. Anything else -- including unreadable JSON or a missing/
+# non-list `packages` -- prints an `invalid:` marker that blocks, so the
+# preflight fails closed on the same declarations the repository contract
+# rejects.
 versions_settings_packages() { # <settings.json>
   local file="$1"
   [ -f "$file" ] || return 3
@@ -160,14 +165,20 @@ versions_settings_packages() { # <settings.json>
 import json, sys
 try:
     data = json.load(open(sys.argv[1], encoding="utf-8"))
-except Exception:
-    sys.exit(4)
+except Exception as exc:
+    print("invalid:settings.json is not valid JSON: " + str(exc).replace("\n", " "))
+    sys.exit(0)
 packages = data.get("packages")
 if not isinstance(packages, list):
+    print("invalid:settings.json has no packages array")
     sys.exit(0)
 for entry in packages:
     if isinstance(entry, str) and entry.strip():
         print(entry.strip())
+    elif isinstance(entry, dict) and isinstance(entry.get("source"), str) and entry["source"].strip():
+        print(entry["source"].strip())
+    else:
+        print("invalid:" + json.dumps(entry, sort_keys=True, ensure_ascii=True))
 PY
 }
 
@@ -222,6 +233,17 @@ versions_npm_pin_is_exact() { # <version>
   [[ "$1" =~ ^((0|[1-9][0-9]*)\.){2}(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?([+][0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
 }
 
+# Mirror the npm package-name grammar in scripts/check-repo.sh's NPM_PIN.
+versions_npm_name_is_valid() { # <name>
+  [[ "$1" =~ ^@[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
+# Mirror the github owner/repo grammar in scripts/check-repo.sh's GIT_PIN and
+# URL_PIN.
+versions_github_path_is_valid() { # <github.com/owner/repo>
+  [[ "$1" =~ ^github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]
+}
+
 # Verify a commit-pinned git source (git: prefix or github URL with @ref).
 # Fills the row from the installed checkout and blocks on any mismatch.
 versions_discover_git_pin() { # <agent_dir> <owner_repo> <pin> <spec>
@@ -264,6 +286,11 @@ versions_discover_package() { # <agent_dir> <repo_dir> <spec>
       versions_split_npm_spec "$body"
       pkg="$VERSIONS_NPM_NAME"
       pin="$VERSIONS_NPM_PIN"
+      if ! versions_npm_name_is_valid "$pkg"; then
+        versions_block "npm package source is malformed: $spec"
+        versions_row "package" "unsupported" "-" BLOCK "malformed npm source"
+        return 0
+      fi
       if [ -z "$pin" ] || ! versions_npm_pin_is_exact "$pin"; then
         versions_block "npm package is not pinned to an exact version: $spec"
         versions_row "npm:$pkg" "floating" "-" BLOCK "no exact version pin"
@@ -288,9 +315,14 @@ versions_discover_package() { # <agent_dir> <repo_dir> <spec>
       pin="${spec##*@}"
       repo_path="${spec#git:}"
       owner_repo="${repo_path%@*}"
+      if ! versions_github_path_is_valid "$owner_repo"; then
+        versions_block "git package source is malformed (expected git:github.com/owner/repo@<commit>): $spec"
+        versions_row "package" "unsupported" "-" BLOCK "malformed git source"
+        return 0
+      fi
       versions_discover_git_pin "$agent_dir" "$owner_repo" "$pin" "$spec"
       ;;
-    http://*|https://*)
+    https://github.com/*)
       # A GitHub URL is a contract pin only with an explicit @<40-hex commit>;
       # a bare URL blocks, exactly like a floating git: source.
       local owner_repo="${spec#*github.com/}" pin=""
@@ -301,10 +333,21 @@ versions_discover_package() { # <agent_dir> <repo_dir> <spec>
           ;;
       esac
       owner_repo="github.com/${owner_repo%.git}"
+      if ! versions_github_path_is_valid "$owner_repo"; then
+        versions_block "https package source is malformed (expected https://github.com/owner/repo@<commit>): $spec"
+        versions_row "package" "unsupported" "-" BLOCK "malformed URL source"
+        return 0
+      fi
       versions_discover_git_pin "$agent_dir" "$owner_repo" "$pin" "$spec"
       ;;
+    invalid:*)
+      local invalid_entry="${spec#invalid:}"
+      versions_block "package declaration is not a supported string or object-with-source entry: $invalid_entry"
+      versions_row "package" "invalid" "-" BLOCK "unsupported declaration"
+      ;;
     *)
-      versions_row "package" "$spec" "-" MISSING "unrecognized package source"
+      versions_block "unsupported package source (only exact npm versions and pinned github git:/https sources are portable): $spec"
+      versions_row "package" "unsupported" "-" BLOCK "unsupported source"
       ;;
   esac
 }
