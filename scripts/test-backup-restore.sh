@@ -533,6 +533,62 @@ else
   fail "restore: no pre-replacement backup directory was created"
 fi
 
+# ---------------------------------------------------------------- 5b. restore symmetry
+# Restore reconciles the snapshot instead of overlaying it: optional sources
+# absent from the snapshot are removed from live, and mirrored directories
+# are synchronized with --delete.
+rm -f "$REPO/pi/keybindings.json"
+rm -rf "$REPO/pi/themes"
+mv "$REPO/mcp/mcp.json" "$WORK/mcp.snapshot"
+printf 'stale extension\n' >"$AGENT/extensions/old-extension.ts"
+printf 'stale shared skill\n' >"$SHARED/agentskill/stale.md"
+printf '{"bindings":{}}\n' >"$AGENT/keybindings.json"
+mkdir -p "$AGENT/themes"
+printf '{"name":"stale-theme"}\n' >"$AGENT/themes/stale.json"
+printf '{"mcpServers":{}}\n' >"$MCP"
+rc=0
+bash "$RESTORE_SH" --yes --no-packages --no-obscura --no-patch >"$WORK/restore-symmetry.log" 2>&1 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  pass "restore: symmetry run completes"
+else
+  fail "restore: symmetry run exited $rc"
+  sed 's/^/        /' "$WORK/restore-symmetry.log" >&2
+fi
+if [ ! -e "$AGENT/keybindings.json" ]; then
+  pass "restore: snapshot-absent optional scalar removed from live"
+else
+  fail "restore: snapshot-absent optional scalar was not removed"
+fi
+if [ ! -e "$AGENT/themes" ]; then
+  pass "restore: snapshot-absent optional directory removed from live"
+else
+  fail "restore: snapshot-absent optional directory was not removed"
+fi
+if [ ! -e "$MCP" ]; then
+  pass "restore: snapshot-absent MCP config removed from live"
+else
+  fail "restore: snapshot-absent MCP config was not removed"
+fi
+if [ ! -e "$AGENT/extensions/old-extension.ts" ]; then
+  pass "restore: stale file inside a mirrored directory removed"
+else
+  fail "restore: stale file inside a mirrored directory survived"
+fi
+if [ ! -e "$SHARED/agentskill/stale.md" ]; then
+  pass "restore: stale shared skill removed"
+else
+  fail "restore: stale shared skill survived"
+fi
+newest_backup="$(ls -1dt "$AGENT/backups"/restore-* 2>/dev/null | head -n1)"
+if [ -n "$newest_backup" ] && [ -f "$newest_backup/mcp/mcp.json" ] && [ -d "$newest_backup/shared-skills" ]; then
+  pass "restore: pre-restore backup includes MCP and shared skills"
+else
+  fail "restore: pre-restore backup is missing MCP or shared skills"
+fi
+
+# Put the snapshot back for the remaining checks.
+git -C "$REPO" checkout -- pi/keybindings.json pi/themes mcp/mcp.json
+
 # ---------------------------------------------------------------- 6. isolation
 REAL_AFTER="$(real_stamp "$REAL_AGENT/settings.json"; real_stamp "$REAL_MCP")"
 if [ "$REAL_BEFORE" = "$REAL_AFTER" ]; then

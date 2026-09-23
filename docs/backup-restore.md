@@ -68,15 +68,23 @@ git clone git@github.com:Okazakee/pi-harness-config.git ~/Desktop/Projects/pi-ha
 bash ~/Desktop/Projects/pi-harness-config/pi/skills/pi-config-backup/scripts/restore.sh
 ```
 
-`restore.sh` restores the config, then best-effort reinstalls the pieces that
-are **not** config: Pi packages (exact pins from `pi/settings.json`; `pi
-update --extensions` reconciles pinned git refs, and pinned or missing npm
-packages install at the next Pi start), the `obscura` MCP binary (the exact
-release pinned in `deps/obscura.lock.json`, verified by SHA-256 before
-extraction), and the TUI renderer patch (plus its `systemd --user` update
-guard). It backs up any
-existing live config first, never touches `auth.json`, and activates the
-tracked Git hooks when it is restoring into a real Git checkout.
+`restore.sh` reconciles the snapshot rather than overlaying it. Required
+sources must exist in the snapshot; optional sources present in the snapshot
+are copied and optional sources absent from it are removed from live; mirrored
+directories (`extensions/`, `skills/`, `agents/`, `themes/`, `shared-skills/`)
+are synchronized with `--delete`. Restore is therefore the inverse of backup
+mirroring: restoring over an existing install reproduces the snapshot instead
+of keeping stale files, and the pre-restore recovery copy covers the Pi agent
+tree, the MCP config and the shared skills.
+
+After the config, it best-effort reinstalls the pieces that are **not**
+config: Pi packages (exact pins from `pi/settings.json`; `pi update
+--extensions` reconciles pinned git refs, and pinned or missing npm packages
+install at the next Pi start), the `obscura` MCP binary (the exact release
+pinned in `deps/obscura.lock.json`, verified by SHA-256 before extraction),
+and the TUI renderer patch (plus its `systemd --user` update guard). It never
+touches `auth.json`, and activates the tracked Git hooks when it is restoring
+into a real Git checkout.
 
 - Flags: `--yes` (no prompt), `--no-packages`, `--no-obscura`, `--no-patch`.
 - Still manual: install Pi itself, then run `pi login` to store credentials.

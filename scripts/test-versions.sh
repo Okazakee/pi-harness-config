@@ -369,6 +369,50 @@ else
   fail "snapshot: pinned entries recorded incorrectly"
 fi
 
+# ---------------------------------------------------------------- package sources
+new_case
+mkdir -p "$AGENT/npm/node_modules/@narumitw/pi-goal"
+printf '{ "version": "0.54.8" }' >"$AGENT/npm/node_modules/@narumitw/pi-goal/package.json"
+write_live_settings '[{"source":"npm:@narumitw/pi-goal@0.54.8","extensions":["extensions/*.ts"]}]'
+discover
+expect_status "object-form package source is discovered" "npm:@narumitw/pi-goal" "OK"
+expect_clear "object-form package source does not block"
+
+new_case
+write_live_settings '[{"extensions":["extensions/*.ts"]}]'
+discover
+expect_blocked "object package without a source blocks backup"
+
+new_case
+write_live_settings '[42]'
+discover
+expect_blocked "non-string non-object package entry blocks backup"
+
+new_case
+write_live_settings '["./local-package"]'
+discover
+expect_blocked "local package path blocks backup"
+
+new_case
+write_live_settings '["ssh://git@github.com/ayghri/i-have-adhd@839872f9d1cd634fed642b4589ce7226199cc15f"]'
+discover
+expect_blocked "ssh package source blocks backup"
+
+new_case
+write_live_settings '["https://gitlab.com/ayghri/i-have-adhd@839872f9d1cd634fed642b4589ce7226199cc15f"]'
+discover
+expect_blocked "non-github https source blocks backup"
+
+new_case
+write_live_settings '["git:gitlab.com/ayghri/i-have-adhd@839872f9d1cd634fed642b4589ce7226199cc15f"]'
+discover
+expect_blocked "non-github git source blocks backup"
+
+new_case
+write_live_settings '["http://github.com/ayghri/i-have-adhd@839872f9d1cd634fed642b4589ce7226199cc15f"]'
+discover
+expect_blocked "insecure http source blocks backup"
+
 # ---------------------------------------------------------------- stale refs
 new_case
 write_repo_metadata "0.87.0"
@@ -581,6 +625,53 @@ else
   fail "snapshot: blocked preflight advanced the snapshot"
 fi
 write_stub obscura "obscura 0.2.3"
+
+# ---- snapshot schema (versions.json) ------------------------------------
+SCHEMA_CHECK="$REPO_ROOT/scripts/check-versions-schema.py"
+make_snapshot() { # <packages-json>
+  python3 - "$1" <<'PY'
+import json, sys
+data = {
+    "schemaVersion": 1,
+    "pi": "0.87.1",
+    "tools": {"rtk": "0.49.0", "trufflehog": "3.97.6", "obscura": "0.2.3"},
+    "packages": json.loads(sys.argv[1]),
+    "git": {"pi-dcp": "8d15a3331c51f3551ccd20583ac0f5ba499a13c3"},
+    "runtime": {"bun": "1.3.14", "node": "22.22.0"},
+}
+print(json.dumps(data))
+PY
+}
+schema_case() { # <description> <clean|problem> <json>
+  local desc="$1" expect="$2" body="$3" file out
+  file="$(mktemp -p "$WORK")"
+  printf '%s\n' "$body" >"$file"
+  out="$(python3 "$SCHEMA_CHECK" "$file" 2>&1)"
+  case "$expect" in
+    clean) [ -z "$out" ] && pass "$desc" || fail "$desc (output: $out)" ;;
+    problem) [ -n "$out" ] && pass "$desc" || fail "$desc (no problem reported)" ;;
+  esac
+}
+
+schema_case "snapshot schema: stable package versions are valid" clean "$(make_snapshot '{"@narumitw/pi-goal":"0.54.8"}')"
+schema_case "snapshot schema: prerelease package versions are valid" clean "$(make_snapshot '{"@narumitw/pi-goal":"0.54.8-beta.1"}')"
+schema_case "snapshot schema: build-metadata package versions are valid" clean "$(make_snapshot '{"@narumitw/pi-goal":"0.54.8-rc.1+build.2"}')"
+schema_case "snapshot schema: npm ranges are rejected" problem "$(make_snapshot '{"@narumitw/pi-goal":"^0.54.8"}')"
+schema_case "snapshot schema: leading-zero versions are rejected" problem "$(make_snapshot '{"@narumitw/pi-goal":"01.2.3"}')"
+
+# A prerelease pin must survive discovery, snapshot generation and schema
+# validation end to end.
+new_case
+mkdir -p "$AGENT/npm/node_modules/@narumitw/pi-goal"
+printf '{ "version": "0.54.8-beta.1" }' >"$AGENT/npm/node_modules/@narumitw/pi-goal/package.json"
+write_live_settings '["npm:@narumitw/pi-goal@0.54.8-beta.1"]'
+discover
+staged="$(versions_snapshot_stage "$REPO")" && versions_snapshot_commit "$staged" "$REPO"
+if out="$(python3 "$SCHEMA_CHECK" "$REPO/pi/versions.json")" && [ -z "$out" ]; then
+  pass "snapshot schema: a prerelease pin round-trips through snapshot validation"
+else
+  fail "snapshot schema: prerelease pin failed validation (${out:-no output})"
+fi
 
 # ---------------------------------------------------------------- offline
 if grep -nE '(curl|wget|git fetch|git pull|npm view)' "$LIB" 2>/dev/null | grep -vE '^[0-9]+: *#' >/dev/null; then

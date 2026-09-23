@@ -153,6 +153,8 @@ PY
 }
 
 # Print one package source spec per line from settings.json packages[].
+# String entries and Pi's object form ({"source": "..."}) are normalized to
+# their source; anything else prints an `invalid:` marker that blocks.
 versions_settings_packages() { # <settings.json>
   local file="$1"
   [ -f "$file" ] || return 3
@@ -168,6 +170,10 @@ if not isinstance(packages, list):
 for entry in packages:
     if isinstance(entry, str) and entry.strip():
         print(entry.strip())
+    elif isinstance(entry, dict) and isinstance(entry.get("source"), str) and entry["source"].strip():
+        print(entry["source"].strip())
+    else:
+        print("invalid:" + json.dumps(entry, sort_keys=True, ensure_ascii=True))
 PY
 }
 
@@ -288,9 +294,17 @@ versions_discover_package() { # <agent_dir> <repo_dir> <spec>
       pin="${spec##*@}"
       repo_path="${spec#git:}"
       owner_repo="${repo_path%@*}"
+      case "$owner_repo" in
+        github.com/*) ;;
+        *)
+          versions_block "unsupported git source (only github.com is supported): $spec"
+          versions_row "package" "unsupported" "-" BLOCK "unsupported source"
+          return 0
+          ;;
+      esac
       versions_discover_git_pin "$agent_dir" "$owner_repo" "$pin" "$spec"
       ;;
-    http://*|https://*)
+    https://github.com/*)
       # A GitHub URL is a contract pin only with an explicit @<40-hex commit>;
       # a bare URL blocks, exactly like a floating git: source.
       local owner_repo="${spec#*github.com/}" pin=""
@@ -303,8 +317,14 @@ versions_discover_package() { # <agent_dir> <repo_dir> <spec>
       owner_repo="github.com/${owner_repo%.git}"
       versions_discover_git_pin "$agent_dir" "$owner_repo" "$pin" "$spec"
       ;;
+    invalid:*)
+      local invalid_entry="${spec#invalid:}"
+      versions_block "package declaration is not a supported string or object-with-source entry: $invalid_entry"
+      versions_row "package" "invalid" "-" BLOCK "unsupported declaration"
+      ;;
     *)
-      versions_row "package" "$spec" "-" MISSING "unrecognized package source"
+      versions_block "unsupported package source (only exact npm versions and pinned github git:/https sources are portable): $spec"
+      versions_row "package" "unsupported" "-" BLOCK "unsupported source"
       ;;
   esac
 }

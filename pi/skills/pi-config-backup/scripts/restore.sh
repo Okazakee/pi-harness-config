@@ -2,6 +2,12 @@
 # ============================================================
 # restore.sh — rebuild the Pi harness from this backup.
 #
+# Config restore is a snapshot reconciliation, not an overlay: required
+# sources must exist in the snapshot, optional sources absent from the
+# snapshot are removed from live, and mirrored directories are synchronized
+# with --delete. The pre-restore recovery copy covers every destination that
+# may be reconciled destructively.
+#
 # Restores the declarative config, then best-effort reinstalls the
 # non-config pieces a fresh machine needs:
 #   1. Pi packages from settings.json      (pi update --extensions)
@@ -82,7 +88,12 @@ if [ "$ASSUME_YES" != 1 ]; then
 fi
 
 # --- 3. Back up existing live config -------------------------
-if [ -d "$AGENT_DIR" ] && [ -n "$(ls -A "$AGENT_DIR" 2>/dev/null)" ]; then
+# The recovery copy covers every destination that restore may reconcile
+# destructively, including MCP and shared skills.
+backup_needed=0
+[ -d "$AGENT_DIR" ] && [ -n "$(ls -A "$AGENT_DIR" 2>/dev/null)" ] && backup_needed=1
+{ [ -f "$MCP_DST" ] || [ -d "$SHARED_SKILLS_DST" ]; } && backup_needed=1
+if [ "$backup_needed" = 1 ]; then
   backup="$AGENT_DIR/backups/restore-$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$backup"
   for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc pi-lsp.json; do
@@ -91,26 +102,72 @@ if [ -d "$AGENT_DIR" ] && [ -n "$(ls -A "$AGENT_DIR" 2>/dev/null)" ]; then
   for d in agents extensions themes skills; do
     [ -d "$AGENT_DIR/$d" ] && cp -a "$AGENT_DIR/$d" "$backup/" 2>/dev/null
   done
+  if [ -f "$MCP_DST" ]; then
+    mkdir -p "$backup/mcp"
+    cp -a "$MCP_DST" "$backup/mcp/mcp.json" 2>/dev/null
+  fi
+  if [ -d "$SHARED_SKILLS_DST" ]; then
+    cp -a "$SHARED_SKILLS_DST" "$backup/shared-skills" 2>/dev/null
+  fi
   log "backed up existing config to $backup"
 fi
 
 mkdir -p "$AGENT_DIR" "$(dirname "$MCP_DST")" "$SHARED_SKILLS_DST"
 
-# --- 4. Restore config files ---------------------------------
-for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc pi-lsp.json; do
-  [ -f "$REPO_DIR/pi/$f" ] && cp -f "$REPO_DIR/pi/$f" "$AGENT_DIR/$f" && log "restored $f"
+# --- 4. Reconcile config files --------------------------------
+# Restore is the inverse of backup mirroring. Required sources must exist
+# in the snapshot; validate them before mutating anything.
+for f in settings.json patch-pi-renderer.py; do
+  [ -f "$REPO_DIR/pi/$f" ] || fail "snapshot is missing required config: pi/$f"
 done
-for d in agents extensions themes skills; do
-  if [ -d "$REPO_DIR/pi/$d" ]; then
-    mkdir -p "$AGENT_DIR/$d"
-    rsync -a --exclude='__pycache__/' --exclude='*.pyc' "$REPO_DIR/pi/$d/" "$AGENT_DIR/$d/"
-    log "restored $d/"
+for d in extensions skills; do
+  [ -d "$REPO_DIR/pi/$d" ] || fail "snapshot is missing required config directory: pi/$d"
+done
+
+for f in settings.json patch-pi-renderer.py; do
+  cp -f "$REPO_DIR/pi/$f" "$AGENT_DIR/$f"
+  log "restored $f"
+done
+for f in AGENTS.md keybindings.json logo.png dcp.jsonc pi-lsp.json; do
+  if [ -f "$REPO_DIR/pi/$f" ]; then
+    cp -f "$REPO_DIR/pi/$f" "$AGENT_DIR/$f"
+    log "restored $f"
+  elif [ -e "$AGENT_DIR/$f" ]; then
+    rm -f "$AGENT_DIR/$f"
+    log "removed $f (absent from snapshot)"
   fi
 done
-[ -f "$REPO_DIR/mcp/mcp.json" ] && cp -f "$REPO_DIR/mcp/mcp.json" "$MCP_DST" && log "restored mcp/mcp.json"
+for d in extensions skills; do
+  mkdir -p "$AGENT_DIR/$d"
+  rsync -a --delete --exclude='__pycache__/' --exclude='*.pyc' "$REPO_DIR/pi/$d/" "$AGENT_DIR/$d/"
+  log "restored $d/"
+done
+for d in agents themes; do
+  if [ -d "$REPO_DIR/pi/$d" ]; then
+    mkdir -p "$AGENT_DIR/$d"
+    rsync -a --delete --exclude='__pycache__/' --exclude='*.pyc' "$REPO_DIR/pi/$d/" "$AGENT_DIR/$d/"
+    log "restored $d/"
+  elif [ -d "$AGENT_DIR/$d" ]; then
+    rm -rf "$AGENT_DIR/$d"
+    log "removed $d/ (absent from snapshot)"
+  fi
+done
+if [ -f "$REPO_DIR/mcp/mcp.json" ]; then
+  cp -f "$REPO_DIR/mcp/mcp.json" "$MCP_DST"
+  log "restored mcp/mcp.json"
+elif [ -e "$MCP_DST" ]; then
+  rm -f "$MCP_DST"
+  log "removed mcp/mcp.json (absent from snapshot)"
+fi
 if [ -d "$REPO_DIR/shared-skills" ]; then
-  rsync -a --exclude='__pycache__/' --exclude='*.pyc' "$REPO_DIR/shared-skills/" "$SHARED_SKILLS_DST/"
+  mkdir -p "$SHARED_SKILLS_DST"
+  rsync -a --delete --exclude='__pycache__/' --exclude='*.pyc' \
+    --exclude='examples/' --exclude='tests/' \
+    "$REPO_DIR/shared-skills/" "$SHARED_SKILLS_DST/"
   log "restored shared-skills/"
+elif [ -d "$SHARED_SKILLS_DST" ]; then
+  rm -rf "$SHARED_SKILLS_DST"
+  log "removed shared-skills/ (absent from snapshot)"
 fi
 
 # --- 5. Pi packages (best effort) ----------------------------

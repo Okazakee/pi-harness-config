@@ -122,7 +122,11 @@ version and every `git:` entry an exact commit. The version preflight blocks
 the backup when an installed package or checkout does not match its pin, so a
 restore rebuilds the pinned graph instead of pulling new upstream releases.
 A declaration that is not exactly pinned (an npm range, an unpinned URL, a
-floating ref) also blocks before anything is copied.
+floating ref) also blocks before anything is copied. Accepted source classes
+are exact `npm:` versions, pinned `git:github.com/...@<40-hex>` and pinned
+`https://github.com/...@<40-hex>`; Pi's object form (`{"source": "..."}`) is
+normalized to its source, while local paths and other protocols (`ssh://`,
+`git://`, non-GitHub hosts) block as non-portable.
 
 To move a pin deliberately: edit `packages` in `~/.pi/agent/settings.json` and
 run `pi update --extensions` (this reconciles pinned git refs). A changed npm
@@ -143,11 +147,18 @@ bash ~/Desktop/Projects/pi-harness-config/pi/skills/pi-config-backup/scripts/res
 Afterwards the live `~/.pi/agent/skills/pi-config-backup/scripts/restore.sh`
 can be used again.
 
-Restores config, then best-effort reinstalls the non-config pieces: Pi packages
-(`pi update --extensions`; pinned and missing npm packages install at the next
-Pi start), the `obscura` MCP binary (the release and per-platform SHA-256 in
-`deps/obscura.lock.json`), and the TUI renderer patch. Backs up existing live
-config first; never writes `auth.json`.
+Restore reconciles the snapshot rather than overlaying it: required sources
+must exist in the snapshot, optional sources absent from the snapshot are
+removed from live, and mirrored directories (`extensions/`, `skills/`,
+`agents/`, `themes/`, `shared-skills/`) are synchronized with `--delete`.
+The pre-restore recovery copy covers the Pi agent tree, MCP config and
+shared skills.
+
+After the config, it best-effort reinstalls the non-config pieces: Pi
+packages (`pi update --extensions`; pinned and missing npm packages install
+at the next Pi start), the `obscura` MCP binary (the release and per-platform
+SHA-256 in `deps/obscura.lock.json`), and the TUI renderer patch. Never
+writes `auth.json`.
 
 - Flags: `--yes`, `--no-packages`, `--no-obscura`, `--no-patch`.
 - Still manual: install Pi itself, then `pi login`.
