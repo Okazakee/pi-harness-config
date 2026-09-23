@@ -13,7 +13,9 @@
 # phase, reports Pi drift, refreshes snapshot metadata, runs the local Pi
 # transition compatibility checks, and runs the repository contract afterwards.
 # The pre-copy guard blocks repository-only edits that differ from live
-# unless --overwrite-repo-edits is passed.
+# unless --overwrite-repo-edits is passed. Absence is mirrored for optional
+# sources, required sources abort the backup when missing, and a failure
+# before the copy phase leaves the repository unchanged.
 # ============================================================
 set -uo pipefail
 
@@ -234,6 +236,45 @@ exit 0
 SH
 chmod +x "$REPO/scripts/check-repo.sh"
 
+# ---------------------------------------------------------------- 1d. transactional pre-copy failure
+# A Pi transition whose compatibility checks fail must leave the repository
+# byte-identical: no README refresh, no copy, no snapshot advance.
+cp "$REPO/README.md" "$WORK/repo-readme.bak"
+cp "$REPO/pi/settings.json" "$WORK/repo-settings.bak"
+git -C "$REPO" checkout -- README.md pi/settings.json
+# Make every mirrored repository file clean so the live renderer change below
+# cannot trip the overwrite guard.
+git -C "$REPO" add -A
+git -C "$REPO" -c user.email=fixture@test -c user.name=fixture commit -q -m "pre-transition fixture"
+printf '#!/usr/bin/env python3\nimport sys\nsys.exit(1)\n' >"$AGENT/patch-pi-renderer.py"
+snapshot_before_transition="$(sha256sum "$REPO/pi/versions.json" | awk '{print $1}')"
+rc=0
+bash "$BACKUP_SH" >"$WORK/backup-transition-fail.log" 2>&1 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'renderer patch signatures are not provable' "$WORK/backup-transition-fail.log"; then
+  pass "backup: failed Pi transition aborts the backup"
+else
+  fail "backup: failed Pi transition did not abort (rc=$rc)"
+fi
+if grep -q '0.87.1' "$REPO/README.md"; then
+  pass "backup: failed transition leaves README metadata unrefreshed"
+else
+  fail "backup: failed transition refreshed README metadata"
+fi
+if grep -q 'copied pi/settings.json' "$WORK/backup-transition-fail.log"; then
+  fail "backup: failed transition copied files"
+else
+  pass "backup: failed transition performed no copy"
+fi
+if [ "$snapshot_before_transition" = "$(sha256sum "$REPO/pi/versions.json" | awk '{print $1}')" ]; then
+  pass "backup: failed transition leaves the version snapshot unchanged"
+else
+  fail "backup: failed transition advanced the version snapshot"
+fi
+# Restore the healthy fixtures.
+printf '#!/usr/bin/env python3\nprint("fixture")\n' >"$AGENT/patch-pi-renderer.py"
+cp "$WORK/repo-readme.bak" "$REPO/README.md"
+cp "$WORK/repo-settings.bak" "$REPO/pi/settings.json"
+
 # ---------------------------------------------------------------- 2. allowlisted round-trip
 for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc pi-lsp.json; do
   if cmp -s "$AGENT/$f" "$REPO/pi/$f"; then
@@ -341,6 +382,91 @@ if [ "$rc" -eq 0 ]; then
 else
   fail "backup: benign dirty state blocked the backup (rc=$rc)"
 fi
+
+# ---------------------------------------------------------------- 3c. deletion and absence semantics
+# Commit the mirrored fixture so the absence tests start from a clean checkout.
+git -C "$REPO" add -A
+git -C "$REPO" -c user.email=fixture@test -c user.name=fixture commit -q -m "snapshot fixture"
+
+# Repository deletion with live present is a conflict: the copy would
+# resurrect the file and discard the repository's deletion.
+rm "$REPO/pi/agents/reviewer.md"
+rc=0
+bash "$BACKUP_SH" >"$WORK/backup-guard-deleted.log" 2>&1 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'pi/agents/reviewer.md' "$WORK/backup-guard-deleted.log"; then
+  pass "backup: repository deletion with live present blocks the copy"
+else
+  fail "backup: repository deletion with live present did not block (rc=$rc)"
+fi
+git -C "$REPO" checkout -- pi/agents/reviewer.md
+
+# Repository and live deletion of the same path is the same state: allowed.
+rm "$REPO/pi/agents/reviewer.md"
+rm "$AGENT/agents/reviewer.md"
+rc=0
+bash "$BACKUP_SH" >"$WORK/backup-guard-both-gone.log" 2>&1 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  pass "backup: matching repository and live deletion is not a conflict"
+else
+  fail "backup: matching deletion blocked the backup (rc=$rc)"
+fi
+printf 'agent fixture\n' >"$AGENT/agents/reviewer.md"
+git -C "$REPO" checkout -- pi/agents/reviewer.md
+
+# Optional scalar removed from live: the stale repository copy is removed.
+rm "$AGENT/keybindings.json"
+rc=0
+bash "$BACKUP_SH" >"$WORK/backup-remove-scalar.log" 2>&1 || rc=$?
+if [ "$rc" -eq 0 ] && [ ! -e "$REPO/pi/keybindings.json" ] && grep -q 'removed pi/keybindings.json' "$WORK/backup-remove-scalar.log"; then
+  pass "backup: optional scalar removal is mirrored"
+else
+  fail "backup: optional scalar removal was not mirrored (rc=$rc)"
+fi
+printf '{\n  "bindings": {}\n}\n' >"$AGENT/keybindings.json"
+git -C "$REPO" checkout -- pi/keybindings.json
+
+# Optional directory removed from live: the stale repository copy is removed.
+rm -rf "$AGENT/themes"
+rc=0
+bash "$BACKUP_SH" >"$WORK/backup-remove-dir.log" 2>&1 || rc=$?
+if [ "$rc" -eq 0 ] && [ ! -e "$REPO/pi/themes" ] && grep -q 'removed pi/themes' "$WORK/backup-remove-dir.log"; then
+  pass "backup: optional directory removal is mirrored"
+else
+  fail "backup: optional directory removal was not mirrored (rc=$rc)"
+fi
+mkdir -p "$AGENT/themes"
+printf '{"name":"fixture-theme"}\n' >"$AGENT/themes/fixture.json"
+git -C "$REPO" checkout -- pi/themes
+
+# Required source missing from live: abort before the repository is touched.
+cp "$REPO/README.md" "$WORK/readme-before-required.bak"
+rm -f "$AGENT/settings.json"
+rc=0
+bash "$BACKUP_SH" >"$WORK/backup-required-scalar.log" 2>&1 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'required live config is missing: .*settings.json' "$WORK/backup-required-scalar.log"; then
+  pass "backup: missing required settings.json blocks before copying"
+else
+  fail "backup: missing required settings.json did not block (rc=$rc)"
+fi
+if cmp -s "$WORK/readme-before-required.bak" "$REPO/README.md"; then
+  pass "backup: required-source failure leaves the repository untouched"
+else
+  fail "backup: required-source failure mutated the repository"
+fi
+printf '{\n  "theme": "fixture",\n  "lastChangelogVersion": "0.87.2",\n  "packages": []\n}\n' >"$AGENT/settings.json"
+
+# Required directory missing from live: same pre-copy block.
+rm -rf "$AGENT/extensions"
+rc=0
+bash "$BACKUP_SH" >"$WORK/backup-required-dir.log" 2>&1 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'required live config directory is missing: .*extensions' "$WORK/backup-required-dir.log"; then
+  pass "backup: missing required extensions/ blocks before copying"
+else
+  fail "backup: missing required extensions/ did not block (rc=$rc)"
+fi
+mkdir -p "$AGENT/extensions/todo"
+printf 'export default 1\n' >"$AGENT/extensions/fixture.ts"
+printf 'export const helperFixture = 1\n' >"$AGENT/extensions/todo/helper.ts"
 
 # ---------------------------------------------------------------- 4. restore round-trip
 DCP_SUM_BEFORE="$(sha256sum "$REPO/pi/dcp.jsonc" | awk '{print $1}')"

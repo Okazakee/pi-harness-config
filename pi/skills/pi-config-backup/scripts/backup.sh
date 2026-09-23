@@ -47,11 +47,24 @@ case "$REPO_DIR" in
   "$HOME/.agents"|"$HOME/.agents"/*) fail "refusing: repo dir is inside the live shared skills dir ($REPO_DIR)" ;;
 esac
 
-# --- 0a. Repository overwrite guard ---------------------------
-# The copy phase mirrors the live config over the repository. Refuse to
-# destroy uncommitted repository content in live-mirrored paths that differs
-# from its live counterpart; a benign dirty tree (previous backup output,
-# already identical to live) is allowed. --overwrite-repo-edits bypasses it.
+# --- 0a. Required source validation ---------------------------
+# Required sources must exist before anything is read, refreshed or copied;
+# their absence is a repository-contract problem, not a snapshot operation.
+[ -f "$AGENT_DIR/settings.json" ] \
+  || fail "required live config is missing: $AGENT_DIR/settings.json (recreate it, or change the repository contract deliberately)"
+[ -d "$AGENT_DIR/extensions" ] \
+  || fail "required live config directory is missing: $AGENT_DIR/extensions (recreate it, or change the repository contract deliberately)"
+[ -f "$AGENT_DIR/patch-pi-renderer.py" ] \
+  || fail "required live config is missing: $AGENT_DIR/patch-pi-renderer.py (recreate it, or change the repository contract deliberately)"
+[ -d "$AGENT_DIR/skills" ] \
+  || fail "required live config directory is missing: $AGENT_DIR/skills (recreate it, or change the repository contract deliberately)"
+
+# --- 0b. Repository overwrite guard ---------------------------
+# The copy phase mirrors the live config over the repository, including
+# removing stale copies of optional sources that disappeared from live.
+# Refuse to destroy uncommitted repository content that differs from its
+# live counterpart; a benign dirty tree (previous backup output, already
+# identical to live) is allowed. --overwrite-repo-edits bypasses it.
 repo_mirror_live_path() { # <repo-relative-path> -> live path, or return 1
   case "$1" in
     pi/AGENTS.md|pi/settings.json|pi/keybindings.json|pi/patch-pi-renderer.py|pi/logo.png|pi/dcp.jsonc|pi/pi-lsp.json|pi/agents/*|pi/extensions/*|pi/themes/*|pi/skills/*)
@@ -74,6 +87,21 @@ repo_dirty_mirrored_files() { # <repo> <pathspec...> -> NUL-separated paths
   git -C "$repo" ls-files --others --exclude-standard -z -- "$@"
 }
 
+# True when the repository and live paths are in the same state: both
+# absent, or both present with identical content (symlinks compared by
+# target). Distinguishes an uncommitted repository-only edit from the
+# previous backup's own output.
+same_mirror_state() { # <repo-path> <live-path>
+  local repo="$1" live="$2"
+  if [ -L "$repo" ] || [ -L "$live" ]; then
+    [ -L "$repo" ] && [ -L "$live" ] && [ "$(readlink -- "$repo")" = "$(readlink -- "$live")" ]
+  elif [ -e "$repo" ]; then
+    [ -e "$live" ] && cmp -s -- "$repo" "$live"
+  else
+    [ ! -e "$live" ]
+  fi
+}
+
 if [ "$ALLOW_OVERWRITE_REPO_EDITS" != 1 ] && git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   MIRRORED_PATHS=(pi/AGENTS.md pi/settings.json pi/keybindings.json pi/patch-pi-renderer.py \
     pi/logo.png pi/dcp.jsonc pi/pi-lsp.json pi/agents pi/extensions pi/themes pi/skills \
@@ -82,7 +110,7 @@ if [ "$ALLOW_OVERWRITE_REPO_EDITS" != 1 ] && git -C "$REPO_DIR" rev-parse --git-
   while IFS= read -r -d '' rel; do
     [ -n "$rel" ] || continue
     live="$(repo_mirror_live_path "$rel")" || continue
-    if [ ! -f "$REPO_DIR/$rel" ] || [ ! -f "$live" ] || ! cmp -s "$REPO_DIR/$rel" "$live"; then
+    if ! same_mirror_state "$REPO_DIR/$rel" "$live"; then
       repo_conflicts+=("$rel")
     fi
   done < <(repo_dirty_mirrored_files "$REPO_DIR" "${MIRRORED_PATHS[@]}")
@@ -96,10 +124,11 @@ if [ "$ALLOW_OVERWRITE_REPO_EDITS" != 1 ] && git -C "$REPO_DIR" rev-parse --git-
   fi
 fi
 
-# --- 0. Live version preflight (must precede any copy) --------
+# --- 0c. Live version preflight (read-only) -------------------
 # Discover what is actually installed, compare it with the repository
-# snapshot, report drift, and refresh snapshot metadata. Blocking
-# inconsistencies abort before the repository is touched.
+# snapshot and report drift. This step never writes to the repository;
+# snapshot metadata is refreshed only after every pre-copy check passed.
+# Blocking inconsistencies abort before the repository is touched.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSIONS_LIB="$SCRIPT_DIR/versions-lib.sh"
 [ -f "$VERSIONS_LIB" ] || fail "missing version preflight helper: $VERSIONS_LIB"
@@ -107,7 +136,7 @@ VERSIONS_LIB="$SCRIPT_DIR/versions-lib.sh"
 . "$VERSIONS_LIB"
 
 preflight_rc=0
-versions_preflight "$AGENT_DIR" "$REPO_DIR" --refresh || preflight_rc=$?
+versions_preflight "$AGENT_DIR" "$REPO_DIR" || preflight_rc=$?
 case "$preflight_rc" in
   0) ;;
   2) fail "live version preflight found blocking inconsistencies — backup aborted before copying" ;;
@@ -122,6 +151,11 @@ if versions_pi_drifted; then
     || fail "Pi version transition compatibility checks failed — resolve before snapshotting"
 fi
 
+# Every pre-copy check passed: only now may the repository be mutated.
+# Refreshing README metadata earlier would leave the repository changed by
+# a backup that later aborted.
+versions_refresh_snapshot_metadata "$REPO_DIR"
+
 # Stage the candidate version snapshot now (from the preflight discovery),
 # but do NOT commit it: the tracked pi/versions.json may only advance after
 # the copy and every verification step have succeeded.
@@ -135,19 +169,30 @@ trap 'rm -f "${SNAPSHOT_STAGED:-}" "${SNAPSHOT_PREV:-}"' EXIT
 mkdir -p "$REPO_DIR/pi" "$REPO_DIR/mcp" "$REPO_DIR/shared-skills"
 
 # --- 1. Scalar config files (explicit allowlist) --------------
-for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc pi-lsp.json; do
+# Required sources were validated in step 0a. Optional sources mirror live
+# absence: a stale repository copy is removed instead of resurrected.
+cp -f "$AGENT_DIR/settings.json" "$REPO_DIR/pi/settings.json"
+log "copied pi/settings.json"
+cp -f "$AGENT_DIR/patch-pi-renderer.py" "$REPO_DIR/pi/patch-pi-renderer.py"
+log "copied pi/patch-pi-renderer.py"
+for f in AGENTS.md keybindings.json logo.png dcp.jsonc pi-lsp.json; do
   if [ -f "$AGENT_DIR/$f" ]; then
     cp -f "$AGENT_DIR/$f" "$REPO_DIR/pi/$f"
     log "copied pi/$f"
+  elif [ -e "$REPO_DIR/pi/$f" ]; then
+    rm -f "$REPO_DIR/pi/$f"
+    log "removed pi/$f (absent from live config)"
   else
     log "skip (absent): pi/$f"
   fi
 done
 
 # --- 2. Declarative directories (mirror; stale files removed) --
-sync_dir() { # src dst label [extra rsync args...]
-  local src="$1" dst="$2" label="$3"
-  shift 3
+# Optional directories mirror live absence: a stale repository copy is
+# removed. Required directories were validated in step 0a.
+sync_dir() { # src dst label required|optional [extra rsync args...]
+  local src="$1" dst="$2" label="$3" required="$4"
+  shift 4
   if [ -d "$src" ]; then
     mkdir -p "$dst"
     rsync -a --delete \
@@ -155,20 +200,28 @@ sync_dir() { # src dst label [extra rsync args...]
       "$@" \
       "$src/" "$dst/"
     log "synced $label ($(find "$dst" -type f | wc -l | tr -d ' ') files)"
+  elif [ "$required" = required ]; then
+    fail "required live config directory is missing: $src"
+  elif [ -e "$dst" ]; then
+    rm -rf "$dst"
+    log "removed $label (absent from live config)"
   else
     log "skip (absent): $label"
   fi
 }
 
-sync_dir "$AGENT_DIR/agents"     "$REPO_DIR/pi/agents"     "pi/agents"
-sync_dir "$AGENT_DIR/extensions" "$REPO_DIR/pi/extensions" "pi/extensions"
-sync_dir "$AGENT_DIR/themes"     "$REPO_DIR/pi/themes"     "pi/themes"
-sync_dir "$AGENT_DIR/skills"     "$REPO_DIR/pi/skills"     "pi/skills"
+sync_dir "$AGENT_DIR/agents"     "$REPO_DIR/pi/agents"     "pi/agents"     optional
+sync_dir "$AGENT_DIR/extensions" "$REPO_DIR/pi/extensions" "pi/extensions" required
+sync_dir "$AGENT_DIR/themes"     "$REPO_DIR/pi/themes"     "pi/themes"     optional
+sync_dir "$AGENT_DIR/skills"     "$REPO_DIR/pi/skills"     "pi/skills"     required
 
-# --- 3. MCP server config (single file) -----------------------
+# --- 3. MCP server config (optional single file) ----------------
 if [ -f "$MCP_SRC" ]; then
   cp -f "$MCP_SRC" "$REPO_DIR/mcp/mcp.json"
   log "copied mcp/mcp.json"
+elif [ -e "$REPO_DIR/mcp/mcp.json" ]; then
+  rm -f "$REPO_DIR/mcp/mcp.json"
+  log "removed mcp/mcp.json (absent from live config)"
 else
   log "skip (absent): $MCP_SRC"
 fi
@@ -177,7 +230,7 @@ fi
 # The third-party agentskill clone ships dev-only `examples/` and `tests/`
 # trees whose dependency manifests trip Dependabot for no real benefit; the
 # skill itself only needs SKILL.md, SYSTEM.md, scripts/ and references/.
-sync_dir "$SHARED_SKILLS_SRC" "$REPO_DIR/shared-skills" "shared-skills" \
+sync_dir "$SHARED_SKILLS_SRC" "$REPO_DIR/shared-skills" "shared-skills" optional \
   --exclude='examples/' --exclude='tests/' --delete-excluded
 
 # --- 5. Defense in depth --------------------------------------

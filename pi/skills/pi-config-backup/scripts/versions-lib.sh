@@ -214,11 +214,12 @@ versions_split_npm_spec() { # <spec-body>; sets VERSIONS_NPM_NAME / VERSIONS_NPM
   esac
 }
 
-# Exact semver only (Pi's npm pin semantics), mirroring the contract regex
-# in scripts/check-repo.sh: reject tags, ranges, caret/tilde/x-ranges and
-# malformed versions so they block instead of floating.
+# Exact version syntax only (Pi's npm pin semantics), mirroring the contract
+# regex in scripts/check-repo.sh: reject tags, ranges, caret/tilde/x-ranges,
+# leading zeros and malformed identifier lists so they block instead of
+# floating. This is SemVer-shaped, not a full SemVer 2.0 grammar.
 versions_npm_pin_is_exact() { # <version>
-  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?$ ]]
+  [[ "$1" =~ ^((0|[1-9][0-9]*)\.){2}(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?([+][0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
 }
 
 # Verify a commit-pinned git source (git: prefix or github URL with @ref).
@@ -623,7 +624,7 @@ versions_scan_stale_references() { # <repo_dir> <old_version>
         printf 'stale-reference: %s  [snapshot metadata; refreshed by the copy phase]\n' "$line"
         ;;
       */README.md:*)
-        printf 'stale-reference: %s  [snapshot metadata; refreshed in place]\n' "$line"
+        printf 'stale-reference: %s  [snapshot metadata; refreshed after the pre-copy checks]\n' "$line"
         ;;
       *)
         printf 'stale-reference: %s  [review: historical/pinned reference, not rewritten]\n' "$line"
@@ -632,13 +633,13 @@ versions_scan_stale_references() { # <repo_dir> <old_version>
   done < <(grep -rIn --exclude-dir=.git --exclude-dir=node_modules -F "$old" "$repo" 2>/dev/null || true)
 }
 
-# Full preflight. Returns 0 when coherent (drift is fine), 2 on blockers,
-# 1 on unexpected discovery failure. `--refresh` updates snapshot metadata
-# (README Pi line) after the drift report.
-versions_preflight() { # <agent_dir> <repo_dir> [--refresh]
+# Full preflight. Read-only: reports drift, compares the snapshot and scans
+# stale references. Returns 0 when coherent (drift is fine), 2 on blockers,
+# 1 on unexpected discovery failure. Snapshot metadata refresh is a separate,
+# explicit step (versions_refresh_snapshot_metadata) so a failure before the
+# copy phase leaves the repository unchanged.
+versions_preflight() { # <agent_dir> <repo_dir>
   local agent_dir="$1" repo_dir="$2"
-  local refresh=0
-  [ "${3:-}" = "--refresh" ] && refresh=1
 
   versions_discover "$agent_dir" "$repo_dir" || return 1
   versions_report
@@ -659,20 +660,33 @@ versions_preflight() { # <agent_dir> <repo_dir> [--refresh]
     esac
   done
 
-  if [ "$refresh" -eq 1 ] && [ -n "$live_pi" ] && [ "$live_pi" != "unknown" ]; then
-    local rc=0
-    versions_refresh_readme_pi_version "$repo_dir" "$live_pi" || rc=$?
-    case "$rc" in
-      0) printf 'Snapshot metadata: README Pi version is %s\n' "$live_pi" ;;
-      3) : ;; # no README in this repository shape
-      4) printf 'WARNING: README has no "- Pi version at backup time:" line to refresh\n' >&2 ;;
-    esac
-  fi
-
   if [ -n "$VERSIONS_PREV_PI" ] && [ "$VERSIONS_PREV_PI" != "$live_pi" ]; then
     versions_scan_stale_references "$repo_dir" "$VERSIONS_PREV_PI"
   fi
 
+  return 0
+}
+
+# Refresh snapshot metadata (the README backup-time Pi line) from the last
+# discovery. Call only after every pre-copy check that may abort has passed:
+# the pre-copy phase must leave the repository unchanged on failure.
+versions_refresh_snapshot_metadata() { # <repo_dir>
+  local repo="$1" row live_pi=""
+  for row in "${VERSIONS_ROWS[@]}"; do
+    case "$row" in
+      "Pi|"*) IFS='|' read -r _ live_pi _ _ _ <<<"$row" ;;
+    esac
+  done
+  if [ -z "$live_pi" ] || [ "$live_pi" = "unknown" ]; then
+    return 0
+  fi
+  local rc=0
+  versions_refresh_readme_pi_version "$repo" "$live_pi" || rc=$?
+  case "$rc" in
+    0) printf 'Snapshot metadata: README Pi version is %s\n' "$live_pi" ;;
+    3) : ;; # no README in this repository shape
+    4) printf 'WARNING: README has no "- Pi version at backup time:" line to refresh\n' >&2 ;;
+  esac
   return 0
 }
 

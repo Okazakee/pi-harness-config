@@ -7,6 +7,17 @@
 `agents/`, `extensions/`, `themes/`, `skills/` directories. Plus
 `~/.config/mcp/mcp.json` and `~/.agents/skills/`.
 
+### Required and optional sources
+
+Absence is mirrored: when an optional source is removed from live, the stale
+repository copy is removed too, so a restore cannot resurrect it. Required
+sources abort the backup before any copy when they are missing.
+
+- **Required:** `settings.json`, `extensions/`, `patch-pi-renderer.py`,
+  `skills/`. The repository contract and its test suites depend on these.
+- **Optional:** `AGENTS.md`, `keybindings.json`, `logo.png`, `dcp.jsonc`,
+  `pi-lsp.json`, `agents/`, `themes/`, `mcp/mcp.json`, `shared-skills/`.
+
 ## What is never backed up
 
 - `auth.json` — OAuth tokens and API keys
@@ -46,8 +57,8 @@ edits in live-mirrored paths (`pi/AGENTS.md`, `pi/settings.json`, `pi/agents/`,
 `pi/extensions/`, `pi/skills/`, `mcp/mcp.json`, `shared-skills/`, …). If such a
 file differs from its live counterpart, the backup aborts instead of
 destroying it; a dirty tree identical to live (the previous backup's own
-output) is allowed. `--overwrite-repo-edits` discards the conflicting edits
-deliberately.
+output) is allowed, and a path absent on both sides counts as identical
+state. `--overwrite-repo-edits` discards the conflicting edits deliberately.
 
 Restore on a new machine (after installing Pi itself; clone the repo first,
 because the live `~/.pi/agent/skills/...` path only exists after a restore):
@@ -82,9 +93,11 @@ local and offline: it reads local binaries, settings, lock files and git
 checkouts, never the network.
 
 The repository is compared against that inventory **before any file is
-copied**. Version drift is reported explicitly (`Pi 0.87.1 → 0.87.2`) and
-current snapshot metadata is refreshed — the README backup-time line in place,
-`pi/settings.json` through the normal copy. Drift alone never fails a backup.
+copied**, and the pre-copy phase is read-only: a backup that aborts before the
+copy phase leaves the repository byte-identical. Version drift is reported
+explicitly (`Pi 0.87.1 → 0.87.2`); only after every pre-copy check has passed
+is the README backup-time line refreshed in place, and `pi/settings.json`
+advances through the normal copy. Drift alone never fails a backup.
 Blocking inconsistencies abort before the repository is touched: runtime Pi
 version vs the managed marker, installed TruffleHog vs the pinned version,
 installed Obscura vs the lock, a non-exact or mismatched package declaration
@@ -97,7 +110,8 @@ snapshot describes the live Pi version and runs the repository contract.
 
 When Pi itself has changed since the previous snapshot, backup also runs the
 existing lightweight transition checks against the current install before
-copying: the renderer patcher's non-mutating `--check` signature proof,
+copying or refreshing metadata: the renderer patcher's non-mutating `--check`
+signature proof,
 headless extension loading (including the repo's todo extension when it is not
 yet restored live), and the `cwd-switch`/`todo` suites when Bun is available.
 

@@ -39,7 +39,7 @@ fi
 
 # ---------------------------------------------------------------- 2. MCP config
 if [ ! -f mcp/mcp.json ]; then
-  fail "mcp/mcp.json is missing"
+  ok "mcp/mcp.json absent (no MCP servers configured)"
 else
   if ! python3 -m json.tool mcp/mcp.json >/dev/null 2>&1; then
     fail "mcp/mcp.json is not valid JSON"
@@ -110,7 +110,7 @@ import sys
 GIT_PIN = re.compile(r"^git:github\.com/[\w.-]+/[\w.-]+@[0-9a-f]{40}$")
 # NPM_PIN mirrors versions_npm_pin_is_exact() in
 # pi/skills/pi-config-backup/scripts/versions-lib.sh — keep them in sync.
-NPM_PIN = re.compile(r"^npm:(?:@[\w.-]+/)?[\w.-]+@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+NPM_PIN = re.compile(r"^npm:(?:@[\w.-]+/)?[\w.-]+@(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$")
 URL_PIN = re.compile(r"^https://github\.com/[\w.-]+/[\w.-]+(?:\.git)?@[0-9a-f]{40}$")
 try:
     settings = json.load(open("pi/settings.json", encoding="utf-8"))
@@ -349,12 +349,16 @@ fi
 
 for json in pi/settings.json pi/pi-lsp.json mcp/mcp.json deps/obscura.lock.json deps/tools.lock.json; do
   if [ ! -f "$json" ]; then
-    fail "expected JSON file is missing: $json"
-  elif ! python3 -m json.tool "$json" >/dev/null 2>&1; then
+    case "$json" in
+      pi/pi-lsp.json|mcp/mcp.json) continue ;; # optional config: absence is a valid state
+      *) fail "expected JSON file is missing: $json" ;;
+    esac
+  fi
+  if ! python3 -m json.tool "$json" >/dev/null 2>&1; then
     fail "invalid JSON: $json"
   fi
 done
-ok "JSON files parse"
+ok "JSON files parse (optional config validated when present)"
 
 if ! git diff --check >/dev/null 2>&1; then
   fail "git diff --check reported whitespace errors (working tree)"
