@@ -94,6 +94,12 @@ force-pushes are rejected, deletion is blocked, and no bypass actors are
 configured. `--no-verify` can bypass the local hooks, but it cannot publish
 directly to protected `main`.
 
+Because the required check is strict — the PR branch must be up to date with
+the base — the `pull_request` run verifies the merge result, so the workflow
+does not run again on the push that creates the merge commit on `main`.
+`workflow_dispatch` can re-verify `main` manually if that ever becomes
+necessary.
+
 ## Local LSP diagnostics
 
 Pi's LSP tools come from the `@narumitw/pi-lsp` package. Routing is resolved

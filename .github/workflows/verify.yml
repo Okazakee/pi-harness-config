@@ -11,13 +11,15 @@ name: verify
 # from a floating tag: scripts/install-trufflehog.sh installs the exact
 # version pinned in deps/tools.lock.json and verifies its SHA-256 first.
 
+# `main` is gated by the pull_request run: the ruleset requires this check
+# with strict "up to date with base" enforcement, so the PR run tests the
+# merge result and the push that follows a merge is not re-tested. Use
+# workflow_dispatch to re-verify `main` manually if that is ever needed.
 on:
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 concurrency:
   group: verify-${{ github.workflow }}-${{ github.ref }}
