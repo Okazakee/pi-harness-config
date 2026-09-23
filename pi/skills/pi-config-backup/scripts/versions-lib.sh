@@ -15,7 +15,8 @@
 #   * Drift is reported, not fatal. A coherent upstream update is normal:
 #     detect -> report -> refresh snapshot metadata -> continue.
 #   * Incoherent live state is fatal: runtime vs managed marker, pinned
-#     tool vs lock, floating DCP pin, malformed lock, missing required
+#     tool vs lock, a non-exact package declaration (floating DCP pin,
+#     unpinned npm/git/URL source), malformed lock, missing required
 #     component.
 #
 # Test hooks: tests prepend a stub directory to PATH so `pi`, `rtk`,
@@ -213,17 +214,11 @@ versions_split_npm_spec() { # <spec-body>; sets VERSIONS_NPM_NAME / VERSIONS_NPM
   esac
 }
 
-# Exact semver only (Pi's npm pin semantics): reject tags, ranges and
-# caret/tilde/x-ranges so they classify as floating instead of blocking.
+# Exact semver only (Pi's npm pin semantics), mirroring the contract regex
+# in scripts/check-repo.sh: reject tags, ranges, caret/tilde/x-ranges and
+# malformed versions so they block instead of floating.
 versions_npm_pin_is_exact() { # <version>
-  case "$1" in
-    [0-9]*.[0-9]*.[0-9]*) ;;
-    *) return 1 ;;
-  esac
-  case "$1" in
-    *[!0-9A-Za-z.+-]*) return 1 ;;
-  esac
-  return 0
+  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?$ ]]
 }
 
 # Verify a commit-pinned git source (git: prefix or github URL with @ref).
@@ -257,8 +252,9 @@ versions_discover_git_pin() { # <agent_dir> <owner_repo> <pin> <spec>
   fi
 }
 
-# Classify one git/npm package spec. Fills the row; pinned npm versions and
-# pinned git refs are verified against the live install and block on drift.
+# Classify one git/npm package spec. Fills the row. Every declared package
+# must be exactly pinned; non-exact npm versions, floating git refs and bare
+# URLs block, as does any live install that disagrees with its pin.
 versions_discover_package() { # <agent_dir> <repo_dir> <spec>
   local agent_dir="$1" repo_dir="$2" spec="$3"
   case "$spec" in
@@ -267,19 +263,21 @@ versions_discover_package() { # <agent_dir> <repo_dir> <spec>
       versions_split_npm_spec "$body"
       pkg="$VERSIONS_NPM_NAME"
       pin="$VERSIONS_NPM_PIN"
-      versions_npm_pin_is_exact "$pin" || pin=""
+      if [ -z "$pin" ] || ! versions_npm_pin_is_exact "$pin"; then
+        versions_block "npm package is not pinned to an exact version: $spec"
+        versions_row "npm:$pkg" "floating" "-" BLOCK "no exact version pin"
+        return 0
+      fi
       installed="$(versions_npm_installed_version "$agent_dir" "$pkg" 2>/dev/null)" || rc=$?
       if [ "$rc" -eq 3 ]; then
-        versions_row "npm:$pkg" "missing" "${pin:--}" MISSING "declared in settings.json"
+        versions_row "npm:$pkg" "missing" "$pin" MISSING "declared in settings.json"
       elif [ -z "$installed" ]; then
-        versions_row "npm:$pkg" "unknown" "${pin:--}" MISSING "unreadable package.json"
-      elif [ -n "$pin" ] && [ "$installed" != "$pin" ]; then
+        versions_row "npm:$pkg" "unknown" "$pin" MISSING "unreadable package.json"
+      elif [ "$installed" != "$pin" ]; then
         versions_block "npm package $pkg installed at $installed but pinned to $pin"
         versions_row "npm:$pkg" "$installed" "$pin" BLOCK "installed != pinned"
-      elif [ -n "$pin" ]; then
-        versions_row "npm:$pkg" "$installed" "$pin" OK "pinned version"
       else
-        versions_row "npm:$pkg" "$installed" "-" OK "installed"
+        versions_row "npm:$pkg" "$installed" "$pin" OK "pinned version"
       fi
       ;;
     git:*)
@@ -292,6 +290,8 @@ versions_discover_package() { # <agent_dir> <repo_dir> <spec>
       versions_discover_git_pin "$agent_dir" "$owner_repo" "$pin" "$spec"
       ;;
     http://*|https://*)
+      # A GitHub URL is a contract pin only with an explicit @<40-hex commit>;
+      # a bare URL blocks, exactly like a floating git: source.
       local owner_repo="${spec#*github.com/}" pin=""
       case "$owner_repo" in
         *@*)
@@ -300,17 +300,7 @@ versions_discover_package() { # <agent_dir> <repo_dir> <spec>
           ;;
       esac
       owner_repo="github.com/${owner_repo%.git}"
-      if [ -n "$pin" ]; then
-        versions_discover_git_pin "$agent_dir" "$owner_repo" "$pin" "$spec"
-      else
-        local checkout="$agent_dir/git/$owner_repo" commit="" rc=0
-        commit="$(versions_git_head "$checkout" 2>/dev/null)" || rc=$?
-        if [ "$rc" -eq 3 ]; then
-          versions_row "git:$owner_repo" "missing" "-" MISSING "checkout not found"
-        else
-          versions_row "git:$owner_repo" "${commit:-unknown}" "-" OK "unpinned source (not a contract pin)"
-        fi
-      fi
+      versions_discover_git_pin "$agent_dir" "$owner_repo" "$pin" "$spec"
       ;;
     *)
       versions_row "package" "$spec" "-" MISSING "unrecognized package source"

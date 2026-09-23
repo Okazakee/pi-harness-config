@@ -4,8 +4,8 @@ Declarative, reproducible backup of the **Pi** coding-agent configuration —
 the parts needed to rebuild the harness on a fresh machine. This is
 **configuration-as-code**, not a dump of runtime state.
 
-This repository is the single source of truth for the Pi harness now that the
-former `omp-harness-config` repo is retired.
+This repository is the canonical versioned snapshot of the Pi harness now
+that the former `omp-harness-config` repo is retired.
 
 - Pi version at backup time: **0.87.1**
 - Full source-path mapping: [`docs/provenance.md`](docs/provenance.md)
@@ -42,6 +42,10 @@ git -C ~/Desktop/Projects/pi-harness-config add -A && \
   git -C ~/Desktop/Projects/pi-harness-config commit -m "pi config: ..."
 git -C ~/Desktop/Projects/pi-harness-config push             # requires authorization
 ```
+
+`backup.sh` refuses to overwrite uncommitted repository edits in
+live-mirrored paths that differ from the live config; pass
+`--overwrite-repo-edits` to discard them deliberately.
 
 Restore on a new machine (after installing Pi itself, clone the repo first —
 the live `~/.pi/agent/skills/...` path only exists after a restore):

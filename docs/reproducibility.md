@@ -4,8 +4,9 @@
 
 `pi/settings.json` is the authoritative pin declaration for Pi's dependency
 graph: every `npm:` entry carries an exact version and every `git:` entry an
-exact commit. `scripts/check-repo.sh` fails when any declared source is not
-exactly pinned.
+exact commit. A declaration that is not exactly pinned blocks the backup in
+the live preflight, before any file is copied, and `scripts/check-repo.sh`
+enforces the same invariant on the repository afterwards.
 
 Pi treats versioned npm specifications as fixed. `pi update --extensions`
 never moves them, and a missing or mismatched install is reconciled to the

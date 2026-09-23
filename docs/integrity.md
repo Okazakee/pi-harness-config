@@ -74,7 +74,9 @@ The repository contract also enforces the dependency pin invariant: every
 entry an exact 40-hex commit, and every GitHub URL an exact commit ref. Pi
 extensions execute with the user's permissions, so a declared source that
 floats would let a restore resolve to whatever upstream published; the
-contract fails instead of allowing that.
+contract fails instead of allowing that. The backup preflight enforces the
+same invariant against the live settings before any file is copied, so a
+floating declaration fails fast rather than after the repository is modified.
 
 `scripts/test-todo.sh` additionally runs one optional smoke test against the
 installed Pi loader when a `pi` binary is on `PATH`: it copies the extension
