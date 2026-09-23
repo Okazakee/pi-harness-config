@@ -589,6 +589,90 @@ fi
 # Put the snapshot back for the remaining checks.
 git -C "$REPO" checkout -- pi/keybindings.json pi/themes mcp/mcp.json
 
+# ---------------------------------------------------------------- 5c. shared-skills absence policy
+mkdir -p "$SHARED/agentskill/examples" "$SHARED/agentskill/tests"
+printf 'dev example\n' >"$SHARED/agentskill/examples/keep.md"
+printf 'dev test\n' >"$SHARED/agentskill/tests/keep.md"
+printf 'managed skill\n' >"$SHARED/agentskill/stale-managed.md"
+mv "$REPO/shared-skills" "$WORK/shared-skills.snapshot"
+rc=0
+bash "$RESTORE_SH" --yes --no-packages --no-obscura --no-patch >"$WORK/restore-shared-absent.log" 2>&1 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  pass "restore: shared-skills absence run completes"
+else
+  fail "restore: shared-skills absence run exited $rc"
+fi
+if [ -f "$SHARED/agentskill/examples/keep.md" ] && [ -f "$SHARED/agentskill/tests/keep.md" ]; then
+  pass "restore: shared-skills absence preserves excluded dev trees"
+else
+  fail "restore: shared-skills absence clobbered excluded dev trees"
+fi
+if [ ! -e "$SHARED/agentskill/stale-managed.md" ]; then
+  pass "restore: shared-skills absence removes managed content"
+else
+  fail "restore: shared-skills absence left managed content"
+fi
+mv "$WORK/shared-skills.snapshot" "$REPO/shared-skills"
+
+# ---------------------------------------------------------------- 5d. strict failure handling
+# A failing recovery copy must abort before any reconciliation.
+REAL_CP="$(command -v cp)"
+cat >"$WORK/stubs/cp" <<SH
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  case "\$arg" in
+    */backups/restore-*) echo "stub cp: refusing \$arg" >&2; exit 1 ;;
+  esac
+done
+exec "$REAL_CP" "\$@"
+SH
+chmod +x "$WORK/stubs/cp"
+printf 'sentinel settings\n' >"$AGENT/settings.json"
+rc=0
+bash "$RESTORE_SH" --yes --no-packages --no-obscura --no-patch >"$WORK/restore-recovery-fail.log" 2>&1 || rc=$?
+rm -f "$WORK/stubs/cp"
+if [ "$rc" -ne 0 ]; then
+  pass "restore: failed recovery copy aborts"
+else
+  fail "restore: failed recovery copy did not abort (rc=$rc)"
+fi
+if grep -q 'copy failed' "$WORK/restore-recovery-fail.log" && ! grep -q 'backed up existing config' "$WORK/restore-recovery-fail.log"; then
+  pass "restore: failed recovery copy is not logged as success"
+else
+  fail "restore: failed recovery copy was falsely logged"
+fi
+if grep -q 'sentinel settings' "$AGENT/settings.json" && ! grep -q 'restored settings.json' "$WORK/restore-recovery-fail.log"; then
+  pass "restore: failed recovery copy prevents reconciliation"
+else
+  fail "restore: reconciliation ran after a failed recovery copy"
+fi
+
+# A failing rsync during reconciliation must abort non-zero.
+cat >"$WORK/stubs/rsync" <<'SH'
+#!/usr/bin/env bash
+echo "stub rsync: failing" >&2
+exit 1
+SH
+chmod +x "$WORK/stubs/rsync"
+rc=0
+bash "$RESTORE_SH" --yes --no-packages --no-obscura --no-patch >"$WORK/restore-rsync-fail.log" 2>&1 || rc=$?
+rm -f "$WORK/stubs/rsync"
+if [ "$rc" -ne 0 ]; then
+  pass "restore: failed reconciliation sync aborts"
+else
+  fail "restore: failed reconciliation sync did not abort (rc=$rc)"
+fi
+if grep -q 'snapshot reconciliation failed' "$WORK/restore-rsync-fail.log"; then
+  pass "restore: failed sync reports the reconciliation error"
+else
+  fail "restore: failed sync error not reported"
+fi
+if grep -q 'restore: done' "$WORK/restore-rsync-fail.log" || grep -q 'restored extensions/' "$WORK/restore-rsync-fail.log"; then
+  fail "restore: failed sync was falsely logged as success"
+else
+  pass "restore: failed sync is never logged as success"
+fi
+
 # ---------------------------------------------------------------- 6. isolation
 REAL_AFTER="$(real_stamp "$REAL_AGENT/settings.json"; real_stamp "$REAL_MCP")"
 if [ "$REAL_BEFORE" = "$REAL_AFTER" ]; then

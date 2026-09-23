@@ -152,7 +152,11 @@ must exist in the snapshot, optional sources absent from the snapshot are
 removed from live, and mirrored directories (`extensions/`, `skills/`,
 `agents/`, `themes/`, `shared-skills/`) are synchronized with `--delete`.
 The pre-restore recovery copy covers the Pi agent tree, MCP config and
-shared skills.
+shared skills. The config and recovery steps are strict: if the recovery
+copy or a reconciliation step fails, restore aborts instead of reporting
+success. The shared-skills `examples/`/`tests/` trees are excluded from the
+snapshot and are preserved even when the snapshot has no shared-skills
+directory.
 
 After the config, it best-effort reinstalls the non-config pieces: Pi
 packages (`pi update --extensions`; pinned and missing npm packages install

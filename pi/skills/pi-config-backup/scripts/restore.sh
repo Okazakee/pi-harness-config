@@ -65,7 +65,23 @@ log()  { printf 'restore: %s\n' "$*"; }
 warn() { printf 'restore: WARN: %s\n' "$*" >&2; }
 fail() { printf 'restore: ERROR: %s\n' "$*" >&2; exit 1; }
 
+# Strict wrappers for the config/recovery path: restore must never report
+# success after a failed copy, sync or removal. The later package/Obscura/
+# patch steps remain explicitly best-effort.
+must_mkdir() { mkdir -p "$@" || fail "could not create directory: $*"; }
+must_cp()    { cp "$@" || fail "copy failed: $*"; }
+must_rsync() { rsync "$@" || fail "snapshot reconciliation failed: $*"; }
+must_rm()    { rm "$@" || fail "could not remove stale live config: $*"; }
+
 [ -d "$REPO_DIR/pi" ] || fail "no snapshot found at $REPO_DIR/pi"
+
+# --- 0. Validate the snapshot (read-only, before any mutation) ---
+for f in settings.json patch-pi-renderer.py; do
+  [ -f "$REPO_DIR/pi/$f" ] || fail "snapshot is missing required config: pi/$f"
+done
+for d in extensions skills; do
+  [ -d "$REPO_DIR/pi/$d" ] || fail "snapshot is missing required config directory: pi/$d"
+done
 
 # --- 1. Preflight: is Pi itself installed? -------------------
 PI_BIN="$(command -v pi || true)"
@@ -95,78 +111,77 @@ backup_needed=0
 { [ -f "$MCP_DST" ] || [ -d "$SHARED_SKILLS_DST" ]; } && backup_needed=1
 if [ "$backup_needed" = 1 ]; then
   backup="$AGENT_DIR/backups/restore-$(date +%Y%m%d-%H%M%S)"
-  mkdir -p "$backup"
+  must_mkdir "$backup"
   for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc pi-lsp.json; do
-    [ -f "$AGENT_DIR/$f" ] && cp -a "$AGENT_DIR/$f" "$backup/" 2>/dev/null
+    [ -f "$AGENT_DIR/$f" ] && must_cp -a "$AGENT_DIR/$f" "$backup/"
   done
   for d in agents extensions themes skills; do
-    [ -d "$AGENT_DIR/$d" ] && cp -a "$AGENT_DIR/$d" "$backup/" 2>/dev/null
+    [ -d "$AGENT_DIR/$d" ] && must_cp -a "$AGENT_DIR/$d" "$backup/"
   done
   if [ -f "$MCP_DST" ]; then
-    mkdir -p "$backup/mcp"
-    cp -a "$MCP_DST" "$backup/mcp/mcp.json" 2>/dev/null
+    must_mkdir "$backup/mcp"
+    must_cp -a "$MCP_DST" "$backup/mcp/mcp.json"
   fi
   if [ -d "$SHARED_SKILLS_DST" ]; then
-    cp -a "$SHARED_SKILLS_DST" "$backup/shared-skills" 2>/dev/null
+    must_cp -a "$SHARED_SKILLS_DST" "$backup/shared-skills"
   fi
   log "backed up existing config to $backup"
 fi
 
-mkdir -p "$AGENT_DIR" "$(dirname "$MCP_DST")" "$SHARED_SKILLS_DST"
+must_mkdir "$AGENT_DIR" "$(dirname "$MCP_DST")" "$SHARED_SKILLS_DST"
 
 # --- 4. Reconcile config files --------------------------------
-# Restore is the inverse of backup mirroring. Required sources must exist
-# in the snapshot; validate them before mutating anything.
+# Restore is the inverse of backup mirroring; the snapshot was validated in
+# step 0 and every copy, sync and removal below must succeed.
 for f in settings.json patch-pi-renderer.py; do
-  [ -f "$REPO_DIR/pi/$f" ] || fail "snapshot is missing required config: pi/$f"
-done
-for d in extensions skills; do
-  [ -d "$REPO_DIR/pi/$d" ] || fail "snapshot is missing required config directory: pi/$d"
-done
-
-for f in settings.json patch-pi-renderer.py; do
-  cp -f "$REPO_DIR/pi/$f" "$AGENT_DIR/$f"
+  must_cp -f "$REPO_DIR/pi/$f" "$AGENT_DIR/$f"
   log "restored $f"
 done
 for f in AGENTS.md keybindings.json logo.png dcp.jsonc pi-lsp.json; do
   if [ -f "$REPO_DIR/pi/$f" ]; then
-    cp -f "$REPO_DIR/pi/$f" "$AGENT_DIR/$f"
+    must_cp -f "$REPO_DIR/pi/$f" "$AGENT_DIR/$f"
     log "restored $f"
   elif [ -e "$AGENT_DIR/$f" ]; then
-    rm -f "$AGENT_DIR/$f"
+    must_rm -f "$AGENT_DIR/$f"
     log "removed $f (absent from snapshot)"
   fi
 done
 for d in extensions skills; do
-  mkdir -p "$AGENT_DIR/$d"
-  rsync -a --delete --exclude='__pycache__/' --exclude='*.pyc' "$REPO_DIR/pi/$d/" "$AGENT_DIR/$d/"
+  must_mkdir "$AGENT_DIR/$d"
+  must_rsync -a --delete --exclude='__pycache__/' --exclude='*.pyc' "$REPO_DIR/pi/$d/" "$AGENT_DIR/$d/"
   log "restored $d/"
 done
 for d in agents themes; do
   if [ -d "$REPO_DIR/pi/$d" ]; then
-    mkdir -p "$AGENT_DIR/$d"
-    rsync -a --delete --exclude='__pycache__/' --exclude='*.pyc' "$REPO_DIR/pi/$d/" "$AGENT_DIR/$d/"
+    must_mkdir "$AGENT_DIR/$d"
+    must_rsync -a --delete --exclude='__pycache__/' --exclude='*.pyc' "$REPO_DIR/pi/$d/" "$AGENT_DIR/$d/"
     log "restored $d/"
   elif [ -d "$AGENT_DIR/$d" ]; then
-    rm -rf "$AGENT_DIR/$d"
+    must_rm -rf "$AGENT_DIR/$d"
     log "removed $d/ (absent from snapshot)"
   fi
 done
 if [ -f "$REPO_DIR/mcp/mcp.json" ]; then
-  cp -f "$REPO_DIR/mcp/mcp.json" "$MCP_DST"
+  must_cp -f "$REPO_DIR/mcp/mcp.json" "$MCP_DST"
   log "restored mcp/mcp.json"
 elif [ -e "$MCP_DST" ]; then
-  rm -f "$MCP_DST"
+  must_rm -f "$MCP_DST"
   log "removed mcp/mcp.json (absent from snapshot)"
 fi
 if [ -d "$REPO_DIR/shared-skills" ]; then
-  mkdir -p "$SHARED_SKILLS_DST"
-  rsync -a --delete --exclude='__pycache__/' --exclude='*.pyc' \
+  must_mkdir "$SHARED_SKILLS_DST"
+  must_rsync -a --delete --exclude='__pycache__/' --exclude='*.pyc' \
     --exclude='examples/' --exclude='tests/' \
     "$REPO_DIR/shared-skills/" "$SHARED_SKILLS_DST/"
   log "restored shared-skills/"
 elif [ -d "$SHARED_SKILLS_DST" ]; then
-  rm -rf "$SHARED_SKILLS_DST"
+  # The snapshot deliberately excludes dev-only examples/ and tests/, so the
+  # absent-directory branch removes only snapshot-managed content and leaves
+  # those trees in place.
+  empty_dir="$(mktemp -d)"
+  must_rsync -a --delete --exclude='examples/' --exclude='tests/' "$empty_dir/" "$SHARED_SKILLS_DST/"
+  rmdir "$empty_dir"
+  rmdir "$SHARED_SKILLS_DST" 2>/dev/null || true
   log "removed shared-skills/ (absent from snapshot)"
 fi
 

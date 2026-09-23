@@ -413,6 +413,36 @@ write_live_settings '["http://github.com/ayghri/i-have-adhd@839872f9d1cd634fed64
 discover
 expect_blocked "insecure http source blocks backup"
 
+new_case
+write_live_settings '{}'
+discover
+expect_blocked "non-list packages declaration blocks backup"
+
+new_case
+printf '{ "lastChangelogVersion": "0.87.1" }' >"$AGENT/settings.json"
+discover
+expect_blocked "settings without a packages array blocks backup"
+
+new_case
+printf '{ "lastChangelogVersion": "0.87.1", "packages": [' >"$AGENT/settings.json"
+discover
+expect_blocked "unreadable settings JSON blocks backup"
+
+new_case
+write_live_settings '["npm:foo/bar@1.2.3"]'
+discover
+expect_blocked "npm source with an invalid package name blocks backup"
+
+new_case
+write_live_settings '["git:github.com/owner/repo/extra@839872f9d1cd634fed642b4589ce7226199cc15f"]'
+discover
+expect_blocked "git source with an over-long path blocks backup"
+
+new_case
+write_live_settings '["https://github.com/owner/repo/extra@839872f9d1cd634fed642b4589ce7226199cc15f"]'
+discover
+expect_blocked "https source with an over-long path blocks backup"
+
 # ---------------------------------------------------------------- stale refs
 new_case
 write_repo_metadata "0.87.0"

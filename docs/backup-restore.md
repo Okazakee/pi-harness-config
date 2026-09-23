@@ -75,7 +75,11 @@ directories (`extensions/`, `skills/`, `agents/`, `themes/`, `shared-skills/`)
 are synchronized with `--delete`. Restore is therefore the inverse of backup
 mirroring: restoring over an existing install reproduces the snapshot instead
 of keeping stale files, and the pre-restore recovery copy covers the Pi agent
-tree, the MCP config and the shared skills.
+tree, the MCP config and the shared skills. The config and recovery steps are
+strict: a failed recovery copy or reconciliation step aborts restore rather
+than reporting success. The shared-skills `examples/`/`tests/` trees are
+outside the snapshot and are preserved even when the snapshot contains no
+shared-skills directory.
 
 After the config, it best-effort reinstalls the pieces that are **not**
 config: Pi packages (exact pins from `pi/settings.json`; `pi update
