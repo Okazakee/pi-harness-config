@@ -6,6 +6,9 @@
     "gh_grep": {
       "url": "https://mcp.grep.app"
     },
+    "exa": {
+      "url": "https://mcp.exa.ai/mcp"
+    },
     "obscura": {
       "command": "obscura",
       "args": ["mcp"]
