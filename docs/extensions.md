@@ -138,3 +138,21 @@ are refused, and the ChatGPT account id is read from the OAuth token's
 `chatgpt_account_id` claim. No credential is ever printed.
 
 Tests: `scripts/test-statusline.sh`.
+
+## Agent-dir secret loading (`secret-loader`)
+
+[`pi/extensions/secret-loader.ts`](../pi/extensions/secret-loader.ts) bridges the
+agent-dir secret store (`$PI_CODING_AGENT_DIR/.secrets/`, default
+`~/.pi/agent/.secrets/`) to the process environment that
+`@counterposition/pi-web-search` reads.
+
+- Only `BRAVE_API_KEY`, `TAVILY_API_KEY`, `EXA_API_KEY`, and `JINA_API_KEY`
+  are loaded; other files in the store stay file-only until the allowlist is
+  extended deliberately.
+- An already-set environment variable always wins, so shell/CI overrides keep
+  working.
+- Values are never logged, and a missing or blank file is simply skipped.
+- The store itself is never backed up; the repository contract fails if a
+  `.secrets/` directory ever appears inside the clone.
+
+Tests: `scripts/test-secret-loader.sh`.

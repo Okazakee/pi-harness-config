@@ -20,24 +20,30 @@ sources abort the backup before any copy when they are missing.
 
 ## What is never backed up
 
+- `~/.pi/agent/.secrets/` — agent-dir secret store (outside the repository)
 - `auth.json` — OAuth tokens and API keys
 - `sessions/` — conversation history
 - `install/`, `npm/`, `bin/`, `git/` — binaries and package trees
 - `models-store.json`, `mcp-cache.json` — regenerable caches
 - `__pycache__/`, `*.pyc`
 
-## Secrets — `.secrets/` (local, gitignored)
+## Secrets — agent-dir store (never backed up)
 
-Secrets are **not** stored in this repository. They live in a local, gitignored
-`.secrets/` folder at the repo root, one secret per file:
+Secrets are **not** stored in this repository. They live in the Pi agent dir
+at `$PI_CODING_AGENT_DIR/.secrets/` (default `~/.pi/agent/.secrets/`), one
+secret per file:
 
-- **filename** = the secret's name (e.g. `OPENCODE_GO_API_KEY`)
+- **filename** = the secret's name (e.g. `EXA_API_KEY`)
 - **file content** = the secret value
 
-The folder is a core part of the working setup but is never committed. Agents
-read a value only inside the command that needs it (e.g.
-`curl -H "Authorization: Bearer $(cat .secrets/TOKEN)"`) and never print it to
-chat, logs, or files. See [`.secrets/README.md`](../.secrets/README.md).
+Directory mode is `700`, secret files `600`. The store is outside the backup
+allowlist, so it is never copied, committed, or restored. Agents read a value
+only inside the command that needs it (e.g.
+`curl -H "Authorization: Bearer $(cat ~/.pi/agent/.secrets/TOKEN)"`) and never
+print it to chat, logs, or files. `pi/extensions/secret-loader.ts` bridges the
+web-search key names into the process environment. A `.secrets/` directory
+inside this clone is rejected: `backup.sh` aborts before copying, and
+`check-repo.sh` fails on one.
 
 ## Backup and restore
 

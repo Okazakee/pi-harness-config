@@ -4,6 +4,9 @@
   "hideThinkingBlock": true,
   "defaultProvider": "opencode-go",
   "defaultModel": "deepseek-v4.1-flash",
+  "modelThinkingLevels": {
+    "opencode-go/deepseek-v4.1-flash": "max"
+  },
   "tuiMode": "fullscreen",
   "fullscreenExitOutput": "resume-hint",
   "markdown": {

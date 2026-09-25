@@ -37,6 +37,15 @@ else
   ok "no secret/runtime paths tracked"
 fi
 
+# The secret store belongs to the agent dir (~/.pi/agent/.secrets); a store
+# inside the repository clone is a stale pre-migration layout and always a
+# mistake, tracked or not.
+if [ -e .secrets ]; then
+  fail "secret store found at .secrets/ — it belongs in the agent dir (.pi/agent/.secrets)"
+else
+  ok "no secret store inside the repository"
+fi
+
 # ---------------------------------------------------------------- 2. MCP config
 if [ ! -f mcp/mcp.json ]; then
   ok "mcp/mcp.json absent (no MCP servers configured)"
@@ -252,6 +261,7 @@ for script in \
   scripts/test-statusline.sh \
   scripts/test-cwd-switch.sh \
   scripts/test-todo.sh \
+  scripts/test-secret-loader.sh \
   scripts/test-versions.sh \
   scripts/install-renderer-guard.sh \
   .githooks/pre-commit \

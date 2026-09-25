@@ -21,7 +21,8 @@
 # non-zero. Network and extraction failures stay best-effort.
 #
 # Never touches secrets: auth.json is not backed up and is never
-# written. The local .secrets/ store is not touched either.
+# written. The agent-dir secret store (.secrets/) content is never copied,
+# removed, or overwritten; only its directory (mode 700) is ensured.
 #
 # Usage: restore.sh [--yes] [--no-packages] [--no-obscura] [--no-patch]
 # ============================================================
@@ -129,6 +130,11 @@ if [ "$backup_needed" = 1 ]; then
 fi
 
 must_mkdir "$AGENT_DIR" "$(dirname "$MCP_DST")" "$SHARED_SKILLS_DST"
+
+# The agent-dir secret store stays outside the snapshot; restore only makes
+# sure the directory exists with private permissions.
+must_mkdir "$AGENT_DIR/.secrets"
+chmod 700 "$AGENT_DIR/.secrets" || fail "could not secure secret store directory: $AGENT_DIR/.secrets"
 
 # --- 4. Reconcile config files --------------------------------
 # Restore is the inverse of backup mirroring; the snapshot was validated in
@@ -300,7 +306,8 @@ restore: done.
 
 Notes:
   - Secrets are never restored (auth.json is not backed up): run `pi login`.
-  - Local secret store: <repo>/.secrets/ (gitignored; filename = secret name).
+  - Secret store: <agent-dir>/.secrets/ (default ~/.pi/agent/.secrets/;
+    filename = secret name; content is never copied or removed by restore).
   - obscura comes from deps/obscura.lock.json (exact release + SHA-256).
     Update it deliberately with scripts/update-obscura-lock.py.
   - Repository hooks were activated via core.hooksPath where possible.

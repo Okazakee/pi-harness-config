@@ -7,7 +7,9 @@
 # ============================================================
 
 # --- Environment & credentials --------------------------------
-# Local secret store: filename = secret name, content = value. NEVER committed.
+# Canonical secret store lives in the Pi agent dir (~/.pi/agent/.secrets/),
+# outside this repository. This pattern is defense in depth: a stray store
+# inside the clone must still never be committed.
 .secrets/
 .env
 .env.*
@@ -15,6 +17,8 @@
 auth.json
 credentials*
 secrets*
+# `secrets*` is deliberately broad: never name a tracked source file with a
+# `secrets` prefix, or git will silently ignore it.
 tokens*
 *.pem
 *.key

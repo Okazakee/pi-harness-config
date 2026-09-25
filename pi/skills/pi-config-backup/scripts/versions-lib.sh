@@ -797,7 +797,7 @@ versions_pi_transition_checks() { # <agent_dir> <repo_dir>
   # 3. Existing extension test scripts when their runtime is available.
   if command -v bun >/dev/null 2>&1; then
     local test_script
-    for test_script in test-cwd-switch.sh test-todo.sh; do
+    for test_script in test-cwd-switch.sh test-todo.sh test-secret-loader.sh; do
       if [ -x "$repo_dir/scripts/$test_script" ]; then
         if ! "$repo_dir/scripts/$test_script" >/dev/null 2>&1; then
           printf 'version-preflight: ERROR: %s failed after the Pi update\n' "$test_script" >&2

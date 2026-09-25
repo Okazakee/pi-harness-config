@@ -66,6 +66,7 @@ scripts/test-obscura-restore.sh    # Obscura lock + checksum logic
 scripts/test-cwd-switch.sh         # /cd extension unit + wiring tests
 scripts/test-statusline.sh         # provider-usage parsers + footer rendering
 scripts/test-todo.sh               # /todo extension unit + wiring tests
+scripts/test-secret-loader.sh       # agent-dir secret loader tests
 scripts/test-versions.sh           # version drift and preflight logic
 ```
 
@@ -142,10 +143,10 @@ requirement; `pi/pi-lsp.json` itself is backed up with the rest of
 Secret scanning is an additional, independent layer, not a replacement:
 
 - `scripts/check-secrets.sh --staged` scans exactly the blobs about to be
-  committed, copied into an isolated temporary tree. Untracked files,
-  `.secrets/`, and the live working tree are never scanned. It runs with
-  `--no-verification`, so it has no network dependency and stays fast enough
-  for every commit.
+  committed, copied into an isolated temporary tree. Untracked files, the
+  agent-dir secret store, and the live working tree are never scanned. It runs
+  with `--no-verification`, so it has no network dependency and stays fast
+  enough for every commit.
 - `scripts/check-secrets.sh --history` scans every commit in the repository
   (with credential verification enabled).
 - `scripts/check-secret-scanner.sh` proves the scanner still detects a
