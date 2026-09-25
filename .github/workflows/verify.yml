@@ -87,6 +87,9 @@ jobs:
       - name: todo extension tests
         run: ./scripts/test-todo.sh
 
+      - name: Secret loader tests
+        run: ./scripts/test-secret-loader.sh
+
       - name: Statusline provider-usage tests
         run: ./scripts/test-statusline.sh
 

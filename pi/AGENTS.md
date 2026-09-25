@@ -128,12 +128,13 @@ Prefer architecture and invariants over trial-and-error editing until checks tur
 
 ### 4.1 Local secret store
 
-Secrets live as one file per secret in
-`~/Desktop/Projects/pi-harness-config/.secrets/` (**filename** = secret name,
-**content** = value). The folder is gitignored and must never be committed.
+Secrets live as one file per secret in the Pi agent dir:
+`$PI_CODING_AGENT_DIR/.secrets/` (default `~/.pi/agent/.secrets/`,
+**filename** = secret name, **content** = value). The store is outside the
+`pi-harness-config` repository and is never copied, committed, or restored.
 
 - Read a secret only inside the command that needs it, e.g.
-  `curl -H "Authorization: Bearer $(cat ~/Desktop/Projects/pi-harness-config/.secrets/TOKEN)"`.
+  `curl -H "Authorization: Bearer $(cat ~/.pi/agent/.secrets/TOKEN)"`.
 - Never echo, print, log, or copy a secret value into chat, logs, or generated
   files. Refer to secrets by name.
 - If the folder or a named file is missing, say so — never invent a value.

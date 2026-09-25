@@ -24,6 +24,7 @@ and runtime state are deliberately absent.
 | Item | Path |
 | --- | --- |
 | Live Pi agent dir | `~/.pi/agent` |
+| Live secret store | `$PI_CODING_AGENT_DIR/.secrets/` (default `~/.pi/agent/.secrets/`) — never backed up |
 | Live MCP config | `~/.config/mcp/mcp.json` |
 | Live shared skills | `~/.agents/skills` |
 | Backup repo | `~/Desktop/Projects/pi-harness-config` |
@@ -82,28 +83,42 @@ abort the backup before any copy when missing. Optional sources: `AGENTS.md`,
 
 ## Never backed up
 
+- `~/.pi/agent/.secrets/` — agent-dir secret store (outside the repository)
 - `auth.json` — OAuth tokens and API keys
 - `sessions/` — conversation history
 - `install/`, `npm/`, `bin/`, `git/` — binaries and package trees
 - `models-store.json`, `mcp-cache.json` — regenerable caches
 - `__pycache__/`, `*.pyc`
 
-## Secrets — `.secrets/` (local, gitignored)
+## Secrets — agent-dir store (never backed up)
 
-Secrets live in `.secrets/` at the backup-repo root, one secret per file:
-**filename** = secret name, **content** = value. The folder is gitignored and
-must never be committed.
+Secrets live as one file per secret in the Pi agent dir:
+`$PI_CODING_AGENT_DIR/.secrets/` (default `~/.pi/agent/.secrets/`),
+**filename** = secret name, **content** = value. Directory mode 700, files
+mode 600. The store is outside the repository and outside the backup
+allowlist: it is never copied, committed, or restored.
 
 - Read a secret only inside the command that needs it, e.g.
-  `curl -H "Authorization: Bearer $(cat ~/Desktop/Projects/pi-harness-config/.secrets/TOKEN)"`.
-- Never echo, print, log, or copy a secret value into chat or files.
-- The backup script refuses to run if `.secrets/` is ever tracked by git.
+  `curl -H "Authorization: Bearer $(cat ~/.pi/agent/.secrets/TOKEN)"`.
+- Never echo, print, log, or copy a secret value into chat or files. Refer to
+  secrets by name.
+- `pi/extensions/secret-loader.ts` bridges `BRAVE_API_KEY`, `TAVILY_API_KEY`,
+  `EXA_API_KEY`, and `JINA_API_KEY` from the store into the process
+  environment so `pi-web-search` can use them. Other names stay file-only
+  until the allowlist is extended deliberately.
+- A `.secrets/` directory inside the repository clone is forbidden: backup
+  aborts before copying anything when one exists, and `check-repo.sh` fails
+  on one too.
+- `restore.sh` ensures the store directory exists (mode 700) and never writes
+  or removes store content.
 
 ## Safety rules
 
 - The allowlist in `scripts/backup.sh` is authoritative; `.gitignore` is only
   a second line of defense.
 - Never stage or commit `auth.json` or anything under `sessions/`.
+- The agent-dir secret store is never backed up; a `.secrets/` directory
+  inside the clone aborts the backup before any copy.
 - Pushing is an external action: only push with explicit user authorization.
 - This remote is **public**: nothing secret may ever be staged or committed.
   Confirm visibility before pushing:
@@ -162,7 +177,8 @@ After the config, it best-effort reinstalls the non-config pieces: Pi
 packages (`pi update --extensions`; pinned and missing npm packages install
 at the next Pi start), the `obscura` MCP binary (the release and per-platform
 SHA-256 in `deps/obscura.lock.json`), and the TUI renderer patch. Never
-writes `auth.json`.
+writes `auth.json`, and never copies or removes agent-dir secret-store
+content (it only ensures the store directory exists with mode 700).
 
 - Flags: `--yes`, `--no-packages`, `--no-obscura`, `--no-patch`.
 - Still manual: install Pi itself, then `pi login`.

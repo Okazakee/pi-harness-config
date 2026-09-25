@@ -61,9 +61,11 @@ backup/restore implementation (`backup.sh`, `restore.sh`, `obscura-lib.sh`).
 - `pi/dcp.jsonc` is declarative global DCP (Dynamic Context Pruning) policy —
   a human-edited config file, not runtime state. DCP itself performs only
   request-local pruning and never persists context edits.
-- `.secrets/` (repo root) is a local, gitignored secret store: **filename** =
-  secret name, **content** = value. It is intentionally absent from git and
-  from the backup; agents read values from it without printing them.
+- `~/.pi/agent/.secrets/` is the local secret store (agent dir, never in this
+  repository): **filename** = secret name, **content** = value. It is
+  intentionally absent from git and from the backup; agents read values from
+  it without printing them, and `pi/extensions/secret-loader.ts` bridges the
+  web-search key names into the process environment.
 - `pi/extensions/todo.ts` owns the session todo board used for long execution
   scopes; the implementation is split into `pi/extensions/todo/*` helper
   modules, with `todo.ts` remaining the discoverable entrypoint. The board

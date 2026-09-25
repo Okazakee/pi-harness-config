@@ -7,9 +7,10 @@
 # ~/.pi/agent, ~/.config/mcp and ~/.agents are never written to.
 #
 # Verifies: allowlisted scalars round-trip, dcp.jsonc and the MCP config
-# round-trip byte-identically, forbidden paths are never copied, .secrets/
-# and auth.json are never copied, restore backs up the existing config
-# before replacing it, and the live version preflight runs before the copy
+# round-trip byte-identically, forbidden paths are never copied, the agent-dir
+# secret store and auth.json are never copied, a repository-side .secrets/
+# store blocks the copy, restore backs up the existing config before replacing
+# it, and the live version preflight runs before the copy
 # phase, reports Pi drift, refreshes snapshot metadata, runs the local Pi
 # transition compatibility checks, and runs the repository contract afterwards.
 # The pre-copy guard blocks repository-only edits that differ from live
@@ -83,8 +84,9 @@ printf 'npm marker\n' >"$AGENT/npm/marker"
 printf 'bin marker\n' >"$AGENT/bin/marker"
 printf 'git cache marker\n' >"$AGENT/git/marker"
 
-# A local secret store next to the live config must never be picked up either.
-printf 'secret store fixture\n' >"$AGENT/.secrets-fixture-marker"
+# The agent-dir secret store must never be picked up by the snapshot.
+mkdir -p "$AGENT/.secrets"
+printf 'secret store fixture\n' >"$AGENT/.secrets/EXA_API_KEY"
 
 # Version preflight fixtures: stub binaries (prepended to PATH, so the real
 # machine's tools are never used) plus the managed install marker.
@@ -330,6 +332,23 @@ else
   pass "backup: auth.json content absent from the snapshot"
 fi
 
+# A secret store inside the repository clone is rejected before any copy.
+mkdir -p "$REPO/.secrets"
+printf 'repository-side store\n' >"$REPO/.secrets/EXA_API_KEY"
+rc=0
+bash "$BACKUP_SH" >"$WORK/backup-repo-secrets.log" 2>&1 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'secret store found at' "$WORK/backup-repo-secrets.log"; then
+  pass "backup: secret store inside the clone blocks the copy"
+else
+  fail "backup: secret store inside the clone did not block (rc=$rc)"
+fi
+if grep -q 'copied pi/AGENTS.md' "$WORK/backup-repo-secrets.log"; then
+  fail "backup: secret-store guard ran after copying"
+else
+  pass "backup: secret-store guard performed no copy"
+fi
+rm -rf "$REPO/.secrets"
+
 # ---------------------------------------------------------------- 3b. dirty-repo guard
 # A tracked repository-only edit that differs from live must block before any
 # copy, and must be preserved.
@@ -506,6 +525,18 @@ else
   fail "restore: nested extension helper directory was not restored"
 fi
 
+if [ -f "$AGENT/.secrets/EXA_API_KEY" ] && [ "$(cat "$AGENT/.secrets/EXA_API_KEY")" = "secret store fixture" ]; then
+  pass "restore: agent-dir secret store content untouched"
+else
+  fail "restore: restore modified the agent-dir secret store"
+fi
+
+if [ "$(stat -c %a "$AGENT/.secrets")" = "700" ]; then
+  pass "restore: secret store directory mode is 700"
+else
+  fail "restore: secret store directory mode is $(stat -c %a "$AGENT/.secrets" 2>/dev/null)"
+fi
+
 DCP_SUM_AFTER="$(sha256sum "$AGENT/dcp.jsonc" | awk '{print $1}')"
 if [ "$DCP_SUM_AFTER" = "$DCP_SUM_BEFORE" ]; then
   pass "restore: dcp.jsonc round-trips byte-identically"
@@ -542,6 +573,7 @@ rm -rf "$REPO/pi/themes"
 mv "$REPO/mcp/mcp.json" "$WORK/mcp.snapshot"
 printf 'stale extension\n' >"$AGENT/extensions/old-extension.ts"
 printf 'stale shared skill\n' >"$SHARED/agentskill/stale.md"
+printf 'stale secret\n' >"$AGENT/.secrets/stale-secret"
 printf '{"bindings":{}}\n' >"$AGENT/keybindings.json"
 mkdir -p "$AGENT/themes"
 printf '{"name":"stale-theme"}\n' >"$AGENT/themes/stale.json"
@@ -579,6 +611,12 @@ if [ ! -e "$SHARED/agentskill/stale.md" ]; then
 else
   fail "restore: stale shared skill survived"
 fi
+
+if [ -f "$AGENT/.secrets/stale-secret" ] && [ "$(cat "$AGENT/.secrets/stale-secret")" = "stale secret" ]; then
+  pass "restore: agent-dir secret store is outside reconciliation"
+else
+  fail "restore: restore touched the agent-dir secret store"
+fi
 newest_backup="$(ls -1dt "$AGENT/backups"/restore-* 2>/dev/null | head -n1)"
 if [ -n "$newest_backup" ] && [ -f "$newest_backup/mcp/mcp.json" ] && [ -d "$newest_backup/shared-skills" ]; then
   pass "restore: pre-restore backup includes MCP and shared skills"
@@ -590,6 +628,9 @@ fi
 git -C "$REPO" checkout -- pi/keybindings.json pi/themes mcp/mcp.json
 
 # ---------------------------------------------------------------- 5c. shared-skills absence policy
+# The secret store is absent here too: restore must recreate the directory
+# (mode 700) without inventing content.
+rm -rf "$AGENT/.secrets"
 mkdir -p "$SHARED/agentskill/examples" "$SHARED/agentskill/tests"
 printf 'dev example\n' >"$SHARED/agentskill/examples/keep.md"
 printf 'dev test\n' >"$SHARED/agentskill/tests/keep.md"
@@ -601,6 +642,12 @@ if [ "$rc" -eq 0 ]; then
   pass "restore: shared-skills absence run completes"
 else
   fail "restore: shared-skills absence run exited $rc"
+fi
+
+if [ -d "$AGENT/.secrets" ] && [ "$(stat -c %a "$AGENT/.secrets")" = "700" ] && [ -z "$(ls -A "$AGENT/.secrets")" ]; then
+  pass "restore: missing secret store recreated empty with mode 700"
+else
+  fail "restore: secret store directory was not recreated correctly"
 fi
 if [ -f "$SHARED/agentskill/examples/keep.md" ] && [ -f "$SHARED/agentskill/tests/keep.md" ]; then
   pass "restore: shared-skills absence preserves excluded dev trees"

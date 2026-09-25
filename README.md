@@ -23,8 +23,8 @@ server definitions. Credentials and runtime state are deliberately absent.
   shared skills.
 - **Never backed up:** `auth.json`, session transcripts, regenerable caches,
   and the `install/`, `npm/`, `bin/` and `git/` trees.
-- **Secrets stay local:** real values live only in the gitignored `.secrets/`
-  directory; the snapshot holds no credentials.
+- **Secrets stay local:** real values live only in the agent-dir store
+  (`~/.pi/agent/.secrets/`); the snapshot holds no credentials.
 
 The authoritative allowlist, exclusions and secret handling live in
 [`docs/backup-restore.md`](docs/backup-restore.md); repository-owned files such
@@ -79,6 +79,7 @@ scripts/test-obscura-restore.sh    # Obscura lock + checksum logic
 scripts/test-cwd-switch.sh         # /cd extension unit + wiring tests
 scripts/test-statusline.sh         # provider-usage parsers + footer rendering
 scripts/test-todo.sh               # /todo extension unit + wiring tests
+scripts/test-secret-loader.sh       # agent-dir secret loader tests
 scripts/test-versions.sh           # version drift and preflight logic
 ```
 
