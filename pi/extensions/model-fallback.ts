@@ -15,9 +15,9 @@
  *   - No free tier (your auth has opencode-go + openai-codex only).
  *   - No automatic revert to the preferred model; switch back with `/model`
  *     or `/model-fallback reset`. This avoids flapping on a flaky provider.
- *   - Usage-aware reserve: before each turn the active opencode-go usage is
- *     preflighted (cached) and, inside `USAGE_RESERVE_PCT` remaining, fails
- *     over preemptively instead of waiting for a 429.
+ *   - Usage-reserve preflight is disabled by default, so low remaining usage
+ *     does not silently switch models before a request. Explicit provider
+ *     rate-limit / quota / capacity errors still trigger fallback.
  *
  * Edit CHAIN to change the order. `pickNext` is exported for testing.
  */
@@ -60,8 +60,8 @@ const OPENCODE_GO = "opencode-go"
 const OPENCODE_GO_BASE = "https://opencode.ai/zen/go"
 /** Fail over when the provider's remaining usage drops to this percent. */
 const USAGE_RESERVE_PCT = 10
-/** "auto" switches silently; "confirm" asks in the TUI (subagents auto-switch). */
-const USAGE_POLICY: "auto" | "confirm" | "off" = "auto"
+/** "off" disables low-reserve preflight (default); "auto" and "confirm" opt in. */
+const USAGE_POLICY: "auto" | "confirm" | "off" = "off"
 /** Usage preflight cache lifetime. */
 const USAGE_CACHE_MS = 60_000
 const USAGE_TIMEOUT_MS = 8_000
@@ -208,12 +208,12 @@ export default function modelFallback(pi: ExtensionAPI) {
   pi.on("message_end", async (event, ctx) => {
     const errorText = assistantErrorText(event.message)
     if (errorText === null) return
-    if (errorText === "" || LIMIT_RE.test(errorText)) {
-      await failover(ctx, errorText || "retryable provider error")
+    if (LIMIT_RE.test(errorText)) {
+      await failover(ctx, errorText)
     }
   })
 
-  // Proactive: cooldown skip, then usage-reserve preflight.
+  // Proactive: cooldown skip; reserve preflight is opt-in via USAGE_POLICY.
   pi.on("before_agent_start", async (_event, ctx) => {
     const current = currentRef(ctx)
     if (current && isSuppressed(suppressed, current, Date.now())) {
