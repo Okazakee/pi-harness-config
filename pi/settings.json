@@ -2,10 +2,10 @@
   "lastChangelogVersion": "0.87.1",
   "theme": "okazakee",
   "hideThinkingBlock": true,
-  "defaultProvider": "opencode-go",
-  "defaultModel": "deepseek-v4.1-flash",
+  "defaultProvider": "commandcode",
+  "defaultModel": "deepseek/deepseek-v4.1-flash",
   "modelThinkingLevels": {
-    "opencode-go/deepseek-v4.1-flash": "max"
+    "commandcode/deepseek/deepseek-v4.1-flash": "max"
   },
   "tuiMode": "fullscreen",
   "fullscreenExitOutput": "resume-hint",
@@ -26,6 +26,7 @@
     "npm:@narumitw/pi-goal@0.54.8",
     "npm:pi-mcp-adapter@2.36.0",
     "git:github.com/ayghri/i-have-adhd@839872f9d1cd634fed642b4589ce7226199cc15f",
-    "git:github.com/PSU3D0/pi-dcp@8d15a3331c51f3551ccd20583ac0f5ba499a13c3"
+    "git:github.com/PSU3D0/pi-dcp@8d15a3331c51f3551ccd20583ac0f5ba499a13c3",
+    "npm:pi-commandcode-provider@0.7.2"
   ]
 }

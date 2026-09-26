@@ -130,12 +130,15 @@ live in [`pi/extensions/statusline/usage.ts`](../pi/extensions/statusline/usage.
 - **OpenAI Codex** (`openai-codex`) — the pinned ChatGPT
   `https://chatgpt.com/backend-api/wham/usage` route, rendering the primary and
   secondary rate-limit windows with labels derived from their reported length.
+- **Command Code** (`commandcode`) — the pinned
+  `https://api.commandcode.ai/alpha/billing/credits` route, rendering the
+  five-hour and weekly credit windows (`used`/`cap`) as `5h` / `7d`.
 
 Fetches are best-effort and reuse the credential Pi already stores for the
 provider; on any failure the segment is hidden and the last good snapshot is
-kept. The Codex access token is only ever sent to the pinned origin, redirects
-are refused, and the ChatGPT account id is read from the OAuth token's
-`chatgpt_account_id` claim. No credential is ever printed.
+kept. Each credential is only ever sent to its provider's pinned origin,
+redirects are refused, and the ChatGPT account id is read from the OAuth
+token's `chatgpt_account_id` claim. No credential is ever printed.
 
 Tests: `scripts/test-statusline.sh`.
 

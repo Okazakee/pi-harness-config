@@ -1,7 +1,7 @@
 ---
 name: research
 description: External research specialist for library and API documentation, upstream behavior, and current best practices. Use to gather outside context without polluting the main session.
-model: opencode-go/deepseek-v4.1-flash
+model: commandcode/deepseek/deepseek-v4.1-flash
 thinking: high
 tools: read,grep,find,ls,web_search,web_fetch
 sessionPreference: either

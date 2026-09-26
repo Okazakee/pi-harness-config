@@ -1,20 +1,22 @@
 /**
  * Provider usage windows for the custom statusline footer.
  *
- * Two subscription providers expose a usage endpoint that the footer renders
- * in one compact style (`tier · label X% (reset)`):
+ * Three subscription providers expose a usage endpoint that the footer
+ * renders in one compact style (`tier · label X% (reset)`):
  *
  *   opencode-go    GET <base>/v1/usage
  *                  → rolling / weekly / monthly windows
  *   openai-codex   GET https://chatgpt.com/backend-api/wham/usage
  *                  → primary / secondary rate-limit windows
+ *   commandcode    GET https://api.commandcode.ai/alpha/billing/credits
+ *                  → fiveHour / weekly window limits (used/cap credits)
  *
  * Everything here is either pure or takes an injectable `fetch`, so the
  * parsers and the request shape stay unit-testable without Pi, network access
  * or a node_modules tree. Credentials are read only by the caller (Pi's model
- * registry) and are never logged: the ChatGPT OAuth access token is sent
- * exclusively to the pinned origin below, and redirects are refused so the
- * bearer token cannot be forwarded to another host.
+ * registry) and are never logged: each credential is sent exclusively to its
+ * provider's pinned origin below, and redirects are refused so a bearer token
+ * cannot be forwarded to another host.
  */
 
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent"
@@ -31,8 +33,14 @@ export const OPENAI_CODEX_BASE = "https://chatgpt.com/backend-api"
 export const OPENAI_CODEX_USAGE_URL = `${OPENAI_CODEX_BASE}/wham/usage`
 export const OPENAI_CODEX_TIER = "OpenAI Codex"
 
+export const COMMANDCODE = "commandcode"
+/** Pinned Command Code origin; the bearer credential is never sent elsewhere. */
+export const COMMANDCODE_BASE = "https://api.commandcode.ai"
+export const COMMANDCODE_CREDITS_URL = `${COMMANDCODE_BASE}/alpha/billing/credits`
+export const COMMANDCODE_TIER = "Command Code"
+
 /** Providers whose usage windows the footer can render. */
-export const USAGE_PROVIDERS: readonly string[] = [OPENCODE_GO, OPENAI_CODEX]
+export const USAGE_PROVIDERS: readonly string[] = [OPENCODE_GO, OPENAI_CODEX, COMMANDCODE]
 
 export function isUsageProvider(provider: string | undefined): boolean {
 	return provider !== undefined && USAGE_PROVIDERS.includes(provider)
@@ -291,6 +299,73 @@ export async function fetchCodexUsage(
 	})
 	if (!response.ok) return undefined
 	return parseCodexUsage(await response.json())
+}
+
+// ── Command Code ───────────────────────────────────────────────────────────
+
+/**
+ * One Command Code window limit: `used` and `cap` are credit amounts, so the
+ * percent is derived client-side, and `resetAt` is an epoch timestamp in
+ * milliseconds (`0` before the window opens).
+ */
+export interface CommandCodeWindow {
+	percent: number
+	resetsAt: string | undefined
+	status: string
+}
+
+/** Epoch seconds or milliseconds → ISO; unset (0) resets stay undefined. */
+export function commandCodeResetIso(value: unknown): string | undefined {
+	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined
+	const ms = value >= 1e12 ? value : value * 1000
+	const date = new Date(ms)
+	return Number.isFinite(date.getTime()) ? date.toISOString() : undefined
+}
+
+export function readCommandCodeWindow(payload: unknown): CommandCodeWindow | undefined {
+	if (!isRecord(payload)) return undefined
+	const { used, cap, exceeded } = payload
+	if (typeof used !== "number" || !Number.isFinite(used) || used < 0) return undefined
+	if (typeof cap !== "number" || !Number.isFinite(cap) || cap <= 0) return undefined
+	return {
+		// Credit overage (used > cap) reads as a fully consumed window.
+		percent: Math.min(100, (used / cap) * 100),
+		resetsAt: commandCodeResetIso(payload.resetAt),
+		status: exceeded === true ? "exceeded" : "ok",
+	}
+}
+
+export function parseCommandCodeUsage(payload: unknown): UsageSnapshot | undefined {
+	if (!isRecord(payload) || !isRecord(payload.windowLimits)) return undefined
+	const limits = payload.windowLimits
+	const windows: UsageWindowEntry[] = []
+	const add = (label: string, raw: unknown, unit: "m" | "h") => {
+		const window = readCommandCodeWindow(raw)
+		if (window) windows.push({ label, unit, floor: false, window })
+	}
+	add("5h", limits.fiveHour, "m")
+	add("7d", limits.weekly, "h")
+	if (windows.length === 0) return undefined
+	return { tier: COMMANDCODE_TIER, windows, fetchedAt: Date.now() }
+}
+
+export async function fetchCommandCodeUsage(
+	apiKey: string,
+	options: UsageFetchOptions = {},
+): Promise<UsageSnapshot | undefined> {
+	const url = new URL(COMMANDCODE_CREDITS_URL)
+	// Defense in depth: the bearer credential only ever goes to the pinned
+	// origin, even if the URL constant is edited later.
+	if (url.origin !== COMMANDCODE_BASE || !url.pathname.startsWith("/alpha/")) return undefined
+
+	const response = await fetchImplFor(options)(url, {
+		headers: { accept: "application/json", authorization: `Bearer ${apiKey}` },
+		signal: AbortSignal.timeout(timeoutFor(options)),
+		// Never forward the credential to a redirect destination.
+		redirect: "error",
+	})
+	if (!response.ok) return undefined
+	return parseCommandCodeUsage(await response.json())
 }
 
 // ── Formatting ─────────────────────────────────────────────────────────────

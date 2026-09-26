@@ -1,7 +1,7 @@
 ---
 name: explore
 description: Read-only codebase exploration specialist for focused searches, repository reconnaissance, and evidence-backed summaries. Use when you need fast context from files without edits.
-model: opencode-go/deepseek-v4.1-flash
+model: commandcode/deepseek/deepseek-v4.1-flash
 thinking: low
 tools: read, grep, find, ls
 sessionPreference: persistent
