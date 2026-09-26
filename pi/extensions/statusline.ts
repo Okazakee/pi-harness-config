@@ -3,14 +3,15 @@
  *
  * Replaces Pi's built-in footer with a single powerline-ish line:
  *
- *   <pi> · DeepSeek V4.1 Flash · ~/proj · 2.4%/1M · <clock> · OpenCode Go · 5h 0% (4h 51m) · 7d 36% (5d 14h) · mo 65% (16d 9h)
+ *   <pi> · DeepSeek V4.1 Flash · ~/proj · 2.4%/1M · <clock> · Command Code · 5h 0% (4h 51m) · 7d 5% (5d 14h)
  *
  * Provider limit windows come from the active subscription provider's usage
  * endpoint — `GET <baseUrl>/v1/usage` for `opencode-go`, the pinned ChatGPT
- * `/wham/usage` route for `openai-codex` — with the credential Pi already
- * stores. Fetching is best-effort: on any failure (offline, 401, missing
- * subscription, another provider) the usage segment is hidden and the last
- * good snapshot is kept. Provider parsers and the request shape live in
+ * `/wham/usage` route for `openai-codex`, the pinned Command Code
+ * `/alpha/billing/credits` route for `commandcode` — with the credential Pi
+ * already stores. Fetching is best-effort: on any failure (offline, 401,
+ * missing subscription, another provider) the usage segment is hidden and the
+ * last good snapshot is kept. Provider parsers and the request shape live in
  * `statusline/usage.ts`.
  */
 
@@ -19,10 +20,12 @@ import type { ExtensionAPI, ExtensionContext, Theme, ThemeColor } from "@earendi
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 import {
+	COMMANDCODE,
 	OPENCODE_GO,
 	OPENAI_CODEX,
 	SEP,
 	fetchCodexUsage,
+	fetchCommandCodeUsage,
 	fetchOpencodeGoUsage,
 	isUsageProvider,
 	renderUsage,
@@ -57,6 +60,13 @@ async function fetchUsage(ctx: ExtensionContext): Promise<UsageSnapshot | undefi
 		if (!accessToken) return undefined;
 		// The account id and pinned origin live inside the usage module.
 		return fetchCodexUsage(accessToken);
+	}
+	if (provider === COMMANDCODE) {
+		const auth = await ctx.modelRegistry.getProviderAuth(COMMANDCODE);
+		const apiKey = auth?.auth?.apiKey;
+		if (!apiKey) return undefined;
+		// The pinned origin lives inside the usage module.
+		return fetchCommandCodeUsage(apiKey);
 	}
 	return undefined;
 }

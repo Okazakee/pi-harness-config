@@ -2,9 +2,9 @@
 # ============================================================
 # test-statusline.sh — deterministic tests for the statusline provider-usage module.
 #
-# Runs the OpenCode Go / OpenAI Codex usage parsers, the JWT account-id
-# derivation, the pinned-origin request shape and the compact footer rendering
-# under bun. The module is pure or takes an injectable fetch, so no Pi runtime,
+# Runs the OpenCode Go / OpenAI Codex / Command Code usage parsers, the JWT
+# account-id derivation, the pinned-origin request shapes and the compact footer
+# rendering under bun. The module is pure or takes an injectable fetch, so no Pi runtime,
 # network or node_modules tree is needed.
 #
 # Bun is required. A missing runtime is a hard failure, never a silent skip —

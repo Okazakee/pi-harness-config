@@ -11,18 +11,23 @@ import { describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 
 import {
+	COMMANDCODE_CREDITS_URL,
+	COMMANDCODE_TIER,
 	ICON_USAGE,
 	OPENAI_CODEX_USAGE_URL,
 	OPENCODE_GO_TIER,
 	codexAccountId,
 	fetchCodexUsage,
+	fetchCommandCodeUsage,
 	fetchOpencodeGoUsage,
 	formatReset,
 	isUsageProvider,
 	parseCodexUsage,
+	parseCommandCodeUsage,
 	parseOpencodeGoUsage,
 	planTypeDisplay,
 	readCodexWindow,
+	readCommandCodeWindow,
 	readWindow,
 	renderUsage,
 	windowLabel,
@@ -157,6 +162,7 @@ describe("isUsageProvider", () => {
 	test("accepts exactly the rendered providers", () => {
 		expect(isUsageProvider("opencode-go")).toBe(true)
 		expect(isUsageProvider("openai-codex")).toBe(true)
+		expect(isUsageProvider("commandcode")).toBe(true)
 		expect(isUsageProvider("openai")).toBe(false)
 		expect(isUsageProvider(undefined)).toBe(false)
 	})
@@ -301,6 +307,81 @@ describe("fetchCodexUsage", () => {
 	})
 })
 
+// ================================================================ Command Code
+
+const COMMANDCODE_PAYLOAD = {
+	credits: { monthlyCredits: 70, purchasedCredits: 0, freeCredits: 0 },
+	windowLimits: {
+		fiveHour: { used: 0, cap: 14, exceeded: false, resetAt: 0 },
+		weekly: { used: 1.6993372239, cap: 35, exceeded: false, resetAt: NOW + 3 * 86_400_000 },
+	},
+}
+
+describe("readCommandCodeWindow", () => {
+	test("derives the percent from used/cap and converts the ms reset", () => {
+		const window = readCommandCodeWindow({ used: 7, cap: 14, resetAt: NOW + 3_600_000 })
+		expect(window?.percent).toBe(50)
+		expect(window?.resetsAt).toBe(iso(3_600_000))
+		expect(window?.status).toBe("ok")
+	})
+	test("treats resetAt 0 as no countdown and clamps overage to 100%", () => {
+		expect(readCommandCodeWindow({ used: 0, cap: 14, resetAt: 0 })?.resetsAt).toBeUndefined()
+		const over = readCommandCodeWindow({ used: 40, cap: 35, exceeded: true, resetAt: NOW })
+		expect(over?.percent).toBe(100)
+		expect(over?.status).toBe("exceeded")
+	})
+	test("accepts epoch-second resets from older payloads", () => {
+		expect(readCommandCodeWindow({ used: 1, cap: 14, resetAt: NOW / 1000 })?.resetsAt).toBe(iso(0))
+	})
+	test("rejects unusable windows", () => {
+		expect(readCommandCodeWindow({ used: -1, cap: 14 })).toBeUndefined()
+		expect(readCommandCodeWindow({ used: 1, cap: 0 })).toBeUndefined()
+		expect(readCommandCodeWindow({ used: 1 })).toBeUndefined()
+		expect(readCommandCodeWindow("nope")).toBeUndefined()
+		expect(readCommandCodeWindow(undefined)).toBeUndefined()
+	})
+})
+
+describe("parseCommandCodeUsage", () => {
+	test("maps fiveHour/weekly onto the footer's 5h/7d vocabulary", () => {
+		const snapshot = parseCommandCodeUsage(COMMANDCODE_PAYLOAD)
+		expect(snapshot?.tier).toBe(COMMANDCODE_TIER)
+		expect(snapshot?.windows.map((entry) => [entry.label, entry.unit, entry.floor])).toEqual([
+			["5h", "m", false],
+			["7d", "h", false],
+		])
+		expect(snapshot?.windows[0].window.percent).toBe(0)
+		expect(snapshot?.windows[1].window.percent).toBeCloseTo(4.855249211, 6)
+	})
+	test("skips malformed windows and rejects an empty payload", () => {
+		expect(parseCommandCodeUsage({ windowLimits: { fiveHour: { used: 500, cap: 0, resetAt: 0 } } })).toBeUndefined()
+		expect(
+			parseCommandCodeUsage({ windowLimits: { weekly: { used: 1, cap: 35, resetAt: NOW } } })?.windows[0]?.label,
+		).toBe("7d")
+		expect(parseCommandCodeUsage({ windowLimits: {} })).toBeUndefined()
+		expect(parseCommandCodeUsage({ credits: {} })).toBeUndefined()
+		expect(parseCommandCodeUsage(null)).toBeUndefined()
+	})
+})
+
+describe("fetchCommandCodeUsage", () => {
+	test("pins the Command Code origin, refuses redirects and sends the bearer credential", async () => {
+		const { impl, calls } = fakeFetch(COMMANDCODE_PAYLOAD)
+		await fetchCommandCodeUsage("secret-key", { fetchImpl: impl, timeoutMs: 50 })
+		expect(calls[0].url).toBe(COMMANDCODE_CREDITS_URL)
+		expect(calls[0].url.startsWith("https://api.commandcode.ai/alpha/")).toBe(true)
+		expect(calls[0].init?.headers).toEqual({
+			accept: "application/json",
+			authorization: "Bearer secret-key",
+		})
+		expect(calls[0].init?.redirect).toBe("error")
+	})
+	test("hides the segment on a non-OK response", async () => {
+		const { impl } = fakeFetch({}, false)
+		expect(await fetchCommandCodeUsage("secret-key", { fetchImpl: impl, timeoutMs: 50 })).toBeUndefined()
+	})
+})
+
 // ================================================================ formatting
 
 describe("formatReset", () => {
@@ -346,6 +427,8 @@ describe("renderUsage", () => {
 			},
 		}) as UsageSnapshot
 
+	const commandcode = (): UsageSnapshot => parseCommandCodeUsage(COMMANDCODE_PAYLOAD) as UsageSnapshot
+
 	test("renders the OpenCode Go segment in the original style", () => {
 		withFixedNow(NOW, () => {
 			const { theme } = recordingTheme()
@@ -358,6 +441,12 @@ describe("renderUsage", () => {
 		withFixedNow(NOW, () => {
 			const { theme } = recordingTheme()
 			expect(renderUsage(theme, codex())).toBe(`${ICON_USAGE} · Plus · 5h 42% (1h) · 7d 84% (1d)`)
+		})
+	})
+	test("renders the Command Code segment in the same style", () => {
+		withFixedNow(NOW, () => {
+			const { theme } = recordingTheme()
+			expect(renderUsage(theme, commandcode())).toBe(`${ICON_USAGE} · Command Code · 5h 0% · 7d 5% (3d)`)
 		})
 	})
 	test("colors usage by threshold and floors only month-scale windows", () => {

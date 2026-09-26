@@ -1,7 +1,7 @@
 ---
 name: verify
 description: Verification specialist that runs the repository's canonical checks (lint, typecheck, tests, build, packaging) and reports exact results and gaps. Use before declaring work complete.
-model: opencode-go/deepseek-v4.1-flash
+model: commandcode/deepseek/deepseek-v4.1-flash
 thinking: low
 tools: read,bash,grep,find,ls
 sessionPreference: ephemeral

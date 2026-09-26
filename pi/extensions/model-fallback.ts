@@ -12,7 +12,7 @@
  *
  * Scope / non-goals:
  *   - Availability fallback only, never semantic escalation.
- *   - No free tier (your auth has opencode-go + openai-codex only).
+ *   - No free tier (your auth has commandcode + openai-codex).
  *   - No automatic revert to the preferred model; switch back with `/model`
  *     or `/model-fallback reset`. This avoids flapping on a flaky provider.
  *   - Usage-reserve preflight is disabled by default, so low remaining usage
@@ -42,9 +42,9 @@ interface Candidate {
 
 /** Ordered fallback candidates. The active model is skipped when present. */
 const CHAIN: Candidate[] = [
-  { ref: "opencode-go/deepseek-v4.1-flash" },
+  { ref: "commandcode/deepseek/deepseek-v4.1-flash" },
   { ref: "openai-codex/gpt-6-sol", thinking: "high" },
-  { ref: "opencode-go/deepseek-v4-flash" },
+  { ref: "commandcode/deepseek/deepseek-v4-flash" },
   { ref: "openai-codex/gpt-5.6-terra", thinking: "high" },
 ]
 
