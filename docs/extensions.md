@@ -125,19 +125,22 @@ two-row statusline. The top bar is a widget above the editor and stays visible
 while the footer is replaced by the pinned rows below the editor:
 
 ```text
-<pi> 1h 42m · <spinner> 3m 07s          ~/proj (main)
-DeepSeek V4.1 Flash · max · 2.4%/1M · CH87%    <bolt> Command Code · 5h 0% (4h 51m) · 7d 5% (5d 14h) · mo 5% (25d)
+<pi> 24m · <spinner> 3m 07s      <folder> ~/proj <branch> main
+Command Code · DeepSeek V4.1 Flash · max · 2.4%/1M · CH87%    <bolt> 5h 0% (4h 51m) · 7d 5% (5d 14h) · mo 5% (25d)
 ```
 
 - Top bar, left: accumulated agent-work time — the sum of every work run, so
   idle time while Pi sits open never counts — followed by the current task's
   timer (spinner while working, `✓` after a task, `○` before the first one).
-- Top bar, right: session directory, the `/cd` effective directory when active,
-  and the git branch.
-- Footer, left: model name, thinking level, context-window usage and cache-hit
-  rate. Command Code's `(CC)` catalog suffix is dropped because the provider is
-  already named on the right.
-- Footer, right: the active provider's usage windows.
+- Top bar, right: a folder glyph before the session directory, the `/cd`
+  effective directory when active (same glyph, accent color), and a
+  git-branch glyph before the branch.
+- Footer, left: provider label (the usage snapshot's tier — the provider for
+  Command Code / OpenCode Go, the plan name for Codex — or the provider id when
+  no usage endpoint applies), model name, thinking level, context-window usage
+  and cache-hit rate. Command Code's `(CC)` catalog suffix is dropped because
+  the provider is already named.
+- Footer, right: the usage glyph followed by the active provider's windows.
 
 Pi's built-in working row is hidden; the top bar already shows the spinner next
 to the timings, so keeping both would render two spinners.
@@ -145,8 +148,9 @@ to the timings, so keeping both would render two spinners.
 ## Provider usage in the statusline
 
 [`pi/extensions/statusline.ts`](../pi/extensions/statusline.ts) renders the
-active subscription provider's windows as a compact `tier · label X% (reset)`
-segment, right-aligned in the footer. The parsers and the request shape
+active subscription provider's windows as compact `label X% (reset)` groups
+with the usage glyph, right-aligned in the footer; the snapshot's tier is
+rendered to the left as the provider label. The parsers and the request shape
 live in [`pi/extensions/statusline/usage.ts`](../pi/extensions/statusline/usage.ts):
 
 - **OpenCode Go** (`opencode-go`) — `GET <baseUrl>/v1/usage`, rendering the

@@ -3,15 +3,15 @@
  *
  * Top bar — a widget above the editor, always visible:
  *
- *   <pi> 24m · <spinner> 3m 07s          ~/proj (main)
+ *   <pi> 24m · <spinner> 3m 07s      <folder> ~/proj <branch> main
  *
  * The leading time is the accumulated agent-work time (the sum of every work
  * run), not wall-clock time since Pi opened.
  *
- * Bottom bar — the custom footer, model/context/cache on the left and the
- * provider limits on the right:
+ * Bottom bar — the custom footer, provider/model/context/cache on the left and
+ * the usage windows on the right:
  *
- *   DeepSeek V4.1 Flash · max · 2.4%/1M · CH87%    <bolt> Command Code · 5h 0% (4h 51m) · 7d 5% (5d 14h) · mo 5% (25d)
+ *   Command Code · DeepSeek V4.1 Flash · max · 2.4%/1M · CH87%    <bolt> 5h 0% (4h 51m) · 7d 5% (5d 14h) · mo 5% (25d)
  *
  * Pi's built-in working row is hidden: the top bar already shows the spinner
  * next to the timings, so keeping both would print two spinners.
@@ -53,6 +53,10 @@ import {
 // ── Tweakables ─────────────────────────────────────────────────────────────
 /** Leading glyph (nf-md). Matches the user's omp footer. */
 const ICON_PI = "\u{f0d57}";
+/** Folder glyph before a project directory. */
+const ICON_FOLDER = "\u{f024b}";
+/** Git branch glyph before the branch name. */
+const ICON_BRANCH = "\u{f062c}";
 /** Show the active thinking level next to the model name. */
 const SHOW_THINKING_LEVEL = true;
 /** How often provider usage is refetched. */
@@ -297,16 +301,16 @@ export default function statusline(pi: ExtensionAPI) {
 			}
 
 			const right: string[] = [];
-			right.push(theme.fg("text", formatCwd(ctx.cwd)));
+			right.push(`${theme.fg("dim", ICON_FOLDER)} ${theme.fg("text", formatCwd(ctx.cwd))}`);
 
 			// cwd-switch keeps an effective directory for tool calls while the
 			// session directory stays put; show it so the bar never implies that
 			// tools are running in the directory it displays first.
 			const effectiveCwd = footerDataRef?.getExtensionStatuses?.().get("cwd");
-			if (effectiveCwd) right.push(theme.fg("accent", effectiveCwd));
+			if (effectiveCwd) right.push(`${theme.fg("dim", ICON_FOLDER)} ${theme.fg("accent", effectiveCwd)}`);
 
 			const branch = footerDataRef?.getGitBranch();
-			if (branch && branch !== "detached") right.push(theme.fg("dim", branch));
+			if (branch && branch !== "detached") right.push(`${theme.fg("dim", ICON_BRANCH)} ${theme.fg("dim", branch)}`);
 
 			return layoutTopBar(left.join(separator), right, separator, width);
 		};
@@ -335,6 +339,12 @@ export default function statusline(pi: ExtensionAPI) {
 					const separator = theme.fg("dim", SEP);
 
 					const left: string[] = [];
+					// Provider label first: the snapshot tier (the provider for Command
+					// Code/OpenCode Go, the plan for Codex) or the provider id when no
+					// usage endpoint applies.
+					const provider = usage?.tier ?? model?.provider;
+					if (provider) left.push(theme.fg("muted", provider));
+
 					if (model) {
 						let modelText = displayModelName(model.name || model.id);
 						if (SHOW_THINKING_LEVEL && model.reasoning) {
@@ -359,9 +369,7 @@ export default function statusline(pi: ExtensionAPI) {
 					if (cacheHit !== undefined) left.push(theme.fg("muted", `CH${cacheHit.toFixed(1)}%`));
 
 					const leftText = left.join(separator);
-					// Fall back to the bare provider id when no usage segment renders, so
-					// the right side always names the model's provider.
-					const rightText = (usage ? (renderUsage(theme, usage) ?? "") : "") || (model ? theme.fg("muted", model.provider) : "");
+					const rightText = usage ? (renderUsage(theme, usage) ?? "") : "";
 					return [padRow(layoutFooter(leftText, rightText, innerWidth(width)), width)];
 				},
 			};

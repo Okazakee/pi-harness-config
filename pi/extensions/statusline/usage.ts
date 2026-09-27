@@ -1,8 +1,9 @@
 /**
  * Provider usage windows for the custom statusline.
  *
- * Three subscription providers expose a usage endpoint that the footer
- * renders in one compact style (`tier · label X% (reset)`):
+ * Three subscription providers expose a usage endpoint that the statusline
+ * renders in one compact style per window (`label X% (reset)`); the snapshot's
+ * `tier` is rendered separately as the footer's provider label.
  *
  *   opencode-go    GET <base>/v1/usage
  *                  → rolling / weekly / monthly windows
@@ -479,8 +480,9 @@ function pickUsageColor(percent: number): ThemeColor {
 }
 
 /**
- * Compact usage segment: one `label X% (reset)` group per window, identical
- * for both providers. Returns undefined when no window is renderable.
+ * Compact usage segment: one `label X% (reset)` group per window, preceded by
+ * the usage glyph. Returns undefined when no window is renderable. The
+ * provider label (`usage.tier`) is rendered separately, to the left of it.
  */
 export function renderUsage(theme: Theme, usage: UsageSnapshot): string | undefined {
 	if (usage.windows.length === 0) return undefined
@@ -492,6 +494,5 @@ export function renderUsage(theme: Theme, usage: UsageSnapshot): string | undefi
 		const resetText = reset ? theme.fg("muted", ` (${reset})`) : ""
 		return `${entry.label} ${percentText}${resetText}`
 	})
-	const head = usage.tier ? `${theme.fg("accent", usage.tier)}${separator}` : ""
-	return `${theme.fg("muted", ICON_USAGE)}${separator}${head}${parts.join(separator)}`
+	return `${theme.fg("muted", ICON_USAGE)}${separator}${parts.join(separator)}`
 }

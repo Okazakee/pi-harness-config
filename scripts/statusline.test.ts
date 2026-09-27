@@ -548,25 +548,31 @@ describe("renderUsage", () => {
 
 	const commandcode = (): UsageSnapshot => parseCommandCodeUsage(COMMANDCODE_PAYLOAD) as UsageSnapshot
 
-	test("renders the OpenCode Go segment in the original style", () => {
+	test("renders the OpenCode Go windows", () => {
 		withFixedNow(NOW, () => {
 			const { theme } = recordingTheme()
 			expect(renderUsage(theme, opencode())).toBe(
-				`${ICON_USAGE} · OpenCode Go · 5h 13% (3h) · 7d 36% (5d) · mo 65% (16d)`,
+				`${ICON_USAGE} · 5h 13% (3h) · 7d 36% (5d) · mo 65% (16d)`,
 			)
 		})
 	})
-	test("renders the Codex segment in the same style", () => {
+	test("renders the Codex windows", () => {
 		withFixedNow(NOW, () => {
 			const { theme } = recordingTheme()
-			expect(renderUsage(theme, codex())).toBe(`${ICON_USAGE} · Plus · 5h 42% (1h) · 7d 84% (1d)`)
+			expect(renderUsage(theme, codex())).toBe(`${ICON_USAGE} · 5h 42% (1h) · 7d 84% (1d)`)
 		})
 	})
-	test("renders the Command Code segment in the same style", () => {
+	test("renders the Command Code windows", () => {
 		withFixedNow(NOW, () => {
 			const { theme } = recordingTheme()
-			expect(renderUsage(theme, commandcode())).toBe(`${ICON_USAGE} · Command Code · 5h 0% · 7d 5% (3d)`)
+			expect(renderUsage(theme, commandcode())).toBe(`${ICON_USAGE} · 5h 0% · 7d 5% (3d)`)
 		})
+	})
+	test("leaves the provider label out — the footer renders it separately", () => {
+		const snapshot = commandcode()
+		expect(snapshot.tier).toBe(COMMANDCODE_TIER)
+		const { theme } = recordingTheme()
+		expect(renderUsage(theme, snapshot)).not.toContain(COMMANDCODE_TIER)
 	})
 	test("colors usage by threshold and floors only month-scale windows", () => {
 		withFixedNow(NOW, () => {
