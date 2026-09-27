@@ -204,6 +204,32 @@ function layoutTopBar(left: string, rightSegments: string[], separator: string, 
 
 // ── Extension ──────────────────────────────────────────────────────────────
 
+interface WorkTimer {
+	/** Accumulated duration of every completed run. */
+	totalMs: number;
+	/** Last completed run, shown after the total when idle. */
+	lastRunMs?: number;
+	/** Start of the running task, if any. */
+	taskStart?: number;
+	/** Monotonic run id, bumped when a task starts. */
+	runId: number;
+	/** Run id already folded into `totalMs`; makes settle accounting idempotent. */
+	settledId: number;
+}
+
+/**
+ * The timer lives on `globalThis` because `/reload` replaces the extension
+ * runtime: without it every reload would reset the total and hide the last
+ * run. The run/settled ids keep the accounting correct when the old and new
+ * handler both see the same `agent_settled` right after a mid-task reload.
+ */
+const WORK_TIMER_KEY = Symbol.for("pi.okazakee.statusline.work-timer");
+
+function workTimer(): WorkTimer {
+	const holder = globalThis as unknown as Record<symbol, WorkTimer | undefined>;
+	return (holder[WORK_TIMER_KEY] ??= { totalMs: 0, runId: 0, settledId: 0 });
+}
+
 export default function statusline(pi: ExtensionAPI) {
 	let usage: UsageSnapshot | undefined;
 	let usageProvider: string | undefined;
@@ -212,12 +238,9 @@ export default function statusline(pi: ExtensionAPI) {
 	// Stashed by the footer factory: the widget factory receives no footer data.
 	let footerDataRef: ReadonlyFooterDataProvider | undefined;
 
-	// Task timer — rendered as the first element of the top bar.
-	let taskStart: number | undefined;
-	// Sum of every completed work run; the running one replaces it while it lasts.
-	let totalWorkMs = 0;
-	// Duration of the last completed work run, shown after the total when idle.
-	let lastRunMs: number | undefined;
+	// Task timer — rendered as the first element of the top bar and shared
+	// across reloads.
+	const work = workTimer();
 	let spinnerFrame = 0;
 	let spinnerTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -264,8 +287,9 @@ export default function statusline(pi: ExtensionAPI) {
 	}
 
 	pi.on("agent_start", () => {
-		if (taskStart === undefined) {
-			taskStart = Date.now();
+		if (work.taskStart === undefined) {
+			work.runId += 1;
+			work.taskStart = Date.now();
 			spinnerFrame = 0;
 		}
 		startSpinner();
@@ -273,11 +297,17 @@ export default function statusline(pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_settled", () => {
-		if (taskStart !== undefined) {
-			lastRunMs = Date.now() - taskStart;
-			totalWorkMs += lastRunMs;
+		if (work.taskStart !== undefined) {
+			const elapsed = Date.now() - work.taskStart;
+			work.taskStart = undefined;
+			// A mid-task reload can leave the old and new runtime attached at the
+			// same time; only the first settle for a run is folded into the total.
+			if (work.settledId !== work.runId) {
+				work.settledId = work.runId;
+				work.lastRunMs = elapsed;
+				work.totalMs += elapsed;
+			}
 		}
-		taskStart = undefined;
 		stopSpinner();
 		requestRender?.();
 	});
@@ -293,16 +323,16 @@ export default function statusline(pi: ExtensionAPI) {
 		const renderTopBar = (theme: Theme, width: number): string => {
 			const separator = theme.fg("dim", SEP);
 			const left: string[] = [];
-			if (taskStart !== undefined) {
+			if (work.taskStart !== undefined) {
 				// Working: one entity — the running task's timer.
 				const glyph = SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length];
-				left.push(`${theme.fg("accent", glyph)} ${theme.fg("text", formatDuration(Date.now() - taskStart))}`);
+				left.push(`${theme.fg("accent", glyph)} ${theme.fg("text", formatDuration(Date.now() - work.taskStart))}`);
 			} else {
 				// Idle: every completed work run (never idle wall time), then the
 				// last completed run's duration.
-				left.push(`${theme.fg("dim", ICON_PI)} ${theme.fg("text", formatDuration(totalWorkMs))}`);
-				if (lastRunMs !== undefined) {
-					left.push(`${theme.fg("dim", ICON_LAST)} ${theme.fg("muted", formatDuration(lastRunMs))}`);
+				left.push(`${theme.fg("dim", ICON_PI)} ${theme.fg("text", formatDuration(work.totalMs))}`);
+				if (work.lastRunMs !== undefined) {
+					left.push(`${theme.fg("dim", ICON_LAST)} ${theme.fg("muted", formatDuration(work.lastRunMs))}`);
 				}
 			}
 

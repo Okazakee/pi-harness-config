@@ -133,7 +133,9 @@ Command Code · DeepSeek V4.1 Flash · max · 2.4%/1M · CH87%    <bolt> 5h 0% (
 - Top bar, left: while working, a single value — the spinner plus the current
   run's timer. When idle, the pi glyph plus the accumulated agent-work time
   (the sum of every run, so idle time while Pi sits open never counts),
-  followed by a history glyph plus the last completed run's duration.
+  followed by a history glyph plus the last completed run's duration. The
+  timer state lives on `globalThis`, so `/reload` keeps the totals and a
+  running task's start time instead of resetting them.
 - Top bar, right: a folder glyph before the session directory, the `/cd`
   effective directory when active (same glyph, accent color), and a
   git-branch glyph before the branch.
