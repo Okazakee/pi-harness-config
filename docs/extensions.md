@@ -192,9 +192,16 @@ it.
 user prompt
     |
     +--> deterministic bypass?  (explicit delegation / no-delegation /
-    |                            delegated session / off mode / unusable input)
+    |                            low-information continuation / delegated
+    |                            session / off mode / unusable input)
     |
-    +--> Laya classifies the raw bounded prompt
+    +--> language routing (Laya detect_language; uncertain -> English)
+             |
+             v
+       shared warm daemon: english checkpoints | multilingual checkpoint
+             |
+             v
+       typed purpose decision
              |
              v
        confidence gate (answer_confidence)
@@ -207,11 +214,12 @@ user prompt
 ```
 
 - **Modes** (`pi/laya-routing.json`, `off` / `shadow` / `advise`, default
-  `shadow`): `off` performs no classification and writes no telemetry;
+  `shadow`): `off` is genuinely inert — no connect, no spawn, no models, no
+  telemetry (and `/laya-routing mode off` disconnects a running instance);
   `shadow` classifies and records telemetry without injecting anything;
   `advise` injects the hint when `answer_confidence` clears the gate.
-  `/laya-routing status` shows the effective mode and diagnostics,
-  `/laya-routing mode <x>` writes the config file.
+  `/laya-routing status` shows mode, daemon state, checkpoints, grace and the
+  last classification; `/laya-routing mode <x>` writes the config file.
 - **Semantics stay abstract from agent names.** The classifier answers a
   `purpose` enum (`none`, `local_context`, `external_context`, `architecture`)
   and the deterministic mapping lives in code: `local_context -> explore`,
@@ -221,27 +229,60 @@ user prompt
   message appended in the `context` event — the same mechanism as the todo
   nudge — so it is never written back to the session transcript. Explicit user
   intent always wins, and a hint can never trigger delegation by itself.
-- **Fail-open.** A missing runtime or model, timeout, malformed payload,
-  invalid enum or unexpected exception simply produces no hint; the reason is
-  recorded in telemetry.
-- **Runtime and pin.**
-  [`pi/extensions/laya-routing/bridge.py`](../pi/extensions/laya-routing/bridge.py)
-  runs one `python3` process per decision and pins the package version and the
-  model revision in
-  [`pi/extensions/laya-routing/laya.lock.json`](../pi/extensions/laya-routing/laya.lock.json)
-  (`laya[structured]==0.3.20`, `convaiinnovations/laya@55cf4c4e`). Laya is
-  optional: without it the extension stays in fail-open mode. Weights stay in
-  the huggingface cache and are never copied into the repository. The
-  per-decision process is deliberate v1 — no daemon, socket, lease or warm
-  runtime exists until the telemetry shows startup cost is a problem.
-- **Shadow telemetry.** One JSONL event per root turn under
+- **Runtime: one shared warm daemon per user.**
+  [`pi/extensions/laya-routing/daemon.py`](../pi/extensions/laya-routing/daemon.py)
+  is started by the first root Pi that needs it and owns a user-private Unix
+  socket under `$XDG_RUNTIME_DIR/pi-laya` (fallback `/tmp/pi-laya-<uid>`; dir
+  0700, socket 0600). It loads both checkpoints once and serializes inference.
+  The socket connection *is* the lease: `session_start` connects (starting the
+  daemon on first use), `session_shutdown` (quit, reload or session
+  replacement) closes idempotently, and the daemon counts connected clients.
+  With zero clients it arms the shutdown timer (`shutdownGraceMs`, default
+  `300000`); a reconnect cancels it; expiry frees all model RAM and removes
+  the socket. Idle Pi sessions keep the models resident, every Pi instance
+  shares the same daemon, and no Pi ever reloads a model per prompt.
+  A flock singleton plus the socket bind handle startup races; stale sockets
+  are unlinked only while holding the lock.
+- **Language routing and checkpoints.** Both stay resident for the daemon
+  lifetime: `english` = `typed-decisions/`, `multilingual` = `multilingual/`.
+  Selection uses Laya's own dependency-free `detect_language`; uncertain or
+  short prompts default to English. `scripts/laya-routing-eval.py` scored the
+  candidates on the synthetic 44-prompt fixture
+  (`scripts/laya-routing-fixture.json`), English accuracy first: the
+  `typed-decisions` checkpoint won 12/16 vs 11/16 (base root) and 10/16
+  (multilingual), so it is the English checkpoint, while `multilingual`
+  remains the Italian-capable one. Zero-shot accuracy is modest
+  (`external_context` is the weakest class), which is exactly why the rollout
+  default is `shadow`: the hints are measured before they influence anything.
+- **Integrity.** The pinned revision is enforced: the daemon downloads
+  `convaiinnovations/laya` at the lock's revision through
+  `huggingface_hub` and loads the local snapshot path. Each checkpoint's
+  `model.safetensors` sha256 is hashed before load and a mismatch degrades the
+  daemon instead of serving. The installed `laya` version must equal the pin.
+  The wheel digest in the lock is informational: pip resolves the pinned
+  version from PyPI without hash mode, because locking the whole torch graph
+  is out of scope. Weights stay in the huggingface cache and are never copied
+  into the repository.
+- **Fail-open.** A missing runtime or model, wrong pinned version, timeout,
+  malformed payload, invalid enum, language-routing failure or unexpected
+  exception produces no hint and a telemetry reason. A daemon crash is
+  reconnected (or restarted) on the next classification attempt, bounded by a
+  spawn cooldown so a broken runtime cannot loop.
+- **Shadow telemetry.** One JSONL event per root turn (schema 2) under
   `$XDG_STATE_HOME/pi/laya-routing/decisions.jsonl` (default
   `~/.local/state/pi/laya-routing/decisions.jsonl`) — outside the agent dir
-  and the backup repository. It records mode, classifier output and latency,
-  bypass/failure reasons, and whether a `subagent` tool call was observed in
-  the same agent run. It never records prompts, summaries, file names, tool
-  payloads, source or environment values. `changed_course` is not measured:
-  Pi exposes no reliable signal for it.
+  and the backup repository. It records mode, language, checkpoint, daemon id,
+  inference and transport latency, the confidence-gate outcome, the
+  bypass/failure reason, and whether a `subagent` tool call was observed in
+  the same agent run, so repeated `daemon_id` values prove warm reuse. It
+  never records prompts, summaries, file names, tool payloads, source or
+  environment values. `changed_course` is not measured: Pi exposes no reliable
+  signal for it.
+- **Measured locally** (Ryzen AI 9 HX 370, CPU): socket ready in 61 ms; both
+  checkpoints ready in 5.3 s (`english` 2.97 s, `multilingual` 2.04 s);
+  3.36 GB RSS with both resident; warm round trip EN ~300 ms and IT ~111 ms,
+  comfortably inside the 800 ms advisory budget. `$XDG_RUNTIME_DIR/pi-laya/laya.log`
+  records load times, client connects/disconnects and grace arm/exit events.
 
 Tests: `scripts/test-laya-routing.sh`.
 

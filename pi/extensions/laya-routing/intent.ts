@@ -9,8 +9,7 @@
 
 import type { BypassReason } from "./types";
 
-const AGENT_WORDS = "explore|research|architect|verify|review|reviewer";
-const DELEGATION_VERBS = "use|ask|spawn|call|invoke|delegate to|hand (?:it )?to|have";
+const AGENT_WORDS = "explore|research|architect|verify|review|reviewer";const DELEGATION_VERBS = "use|ask|spawn|call|invoke|delegate to|hand (?:it )?to|have";
 
 /** "use the reviewer", "ask research", "spawn explore", "use architect for this". */
 const EXPLICIT_DELEGATION = [
@@ -39,4 +38,54 @@ export function explicitIntent(text: string): BypassReason | null {
 		if (pattern.test(text)) return "explicit_delegation";
 	}
 	return null;
+}
+
+/**
+ * Contextless acknowledgements cannot be classified from the raw prompt
+ * alone, so they skip inference entirely. The list stays tiny on purpose:
+ * missing a case only costs one wasted classification.
+ */
+const LOW_INFORMATION_WORDS = new Set([
+	"yes",
+	"yeah",
+	"yep",
+	"y",
+	"ok",
+	"okay",
+	"k",
+	"sure",
+	"continue",
+	"go",
+	"ahead",
+	"on",
+	"do",
+	"it",
+	"proceed",
+	"please",
+	"sounds",
+	"good",
+	"fine",
+	"si",
+	"sì",
+	"va",
+	"bene",
+	"certo",
+	"continua",
+	"vai",
+	"avanti",
+	"fallo",
+	"procedi",
+	"d'accordo",
+	"perfetto",
+]);
+
+export function lowInformation(text: string): boolean {
+	const words = text
+		.toLowerCase()
+		.replace(/[^\p{L}\p{N}']+/gu, " ")
+		.trim()
+		.split(/\s+/)
+		.filter((word) => word.length > 0);
+	if (words.length === 0 || words.length > 3) return false;
+	return words.every((word) => LOW_INFORMATION_WORDS.has(word));
 }

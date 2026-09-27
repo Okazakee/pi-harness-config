@@ -27,6 +27,8 @@ export interface LayaRoutingConfig {
 	advisoryBudgetMs: number;
 	/** Interpreter that runs the pinned bridge; Laya is not a pi dependency. */
 	python: string;
+	/** How long the shared daemon stays warm after the last client disconnects. */
+	shutdownGraceMs: number;
 }
 
 /**
@@ -41,6 +43,7 @@ export const DEFAULT_CONFIG: LayaRoutingConfig = {
 	timeoutMs: 20_000,
 	advisoryBudgetMs: 800,
 	python: "python3",
+	shutdownGraceMs: 300_000,
 };
 
 const MODES: readonly LayaRoutingMode[] = ["off", "shadow", "advise"];
@@ -101,6 +104,10 @@ export function parseConfig(raw: unknown): ConfigParse {
 	const python = record.python;
 	if (typeof python === "string" && python.trim().length > 0) config.python = python.trim();
 	else if (python !== undefined) warnings.push(`python must be a non-empty string; using ${config.python}`);
+
+	const grace = record.shutdownGraceMs;
+	if (typeof grace === "number" && Number.isInteger(grace) && grace >= 0) config.shutdownGraceMs = grace;
+	else if (grace !== undefined) warnings.push(`shutdownGraceMs must be a non-negative integer; using ${config.shutdownGraceMs}`);
 
 	return { config, warnings };
 }

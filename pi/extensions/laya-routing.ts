@@ -6,13 +6,17 @@
  * request-local `role: "custom"` message (never persisted, never replayed by
  * Pi), never triggers delegation on its own, and only exists in `advise` mode.
  *
- * Modes: `off` (inert), `shadow` (classify + telemetry, never inject),
- * `advise` (inject above the confidence gate). Delegated sessions
- * (`PI_SUBAGENT_DEPTH > 0`) register nothing at all, and explicit user
- * delegation intent always bypasses the classifier.
+ * Modes: `off` (inert; no daemon, no connect, no telemetry), `shadow`
+ * (classify + telemetry, never inject), `advise` (inject above the confidence
+ * gate). Delegated sessions (`PI_SUBAGENT_DEPTH > 0`) register nothing.
  *
- * Everything here fails open: a missing model, timeout, malformed answer or
- * exception yields ordinary Pi behavior with a telemetry `failure` reason.
+ * Runtime: one shared warm daemon per user behind the `DecisionClient`
+ * boundary. This process holds one persistent socket connection while it
+ * runs — the connection is the lease, so the daemon frees all model RAM five
+ * minutes after the last Pi exits. `session_shutdown` closes it idempotently.
+ *
+ * Everything here fails open: a missing daemon, model, timeout, malformed
+ * answer or exception yields ordinary Pi behavior with a telemetry reason.
  */
 
 import { randomUUID } from "node:crypto";
@@ -22,7 +26,7 @@ import { fileURLToPath } from "node:url";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { createLayaProcessClient, execBridge, type BridgeExec } from "./laya-routing/client";
+import { createDaemonDecisionClient } from "./laya-routing/client";
 import {
 	defaultConfigPath,
 	defaultTelemetryPath,
@@ -34,34 +38,25 @@ import {
 	type LayaRoutingConfig,
 	type LayaRoutingMode,
 } from "./laya-routing/config";
-import { explicitIntent } from "./laya-routing/intent";
+import { explicitIntent, lowInformation } from "./laya-routing/intent";
 import { buildHintMessage, sanitizePrompt, specialistFor } from "./laya-routing/routing";
 import { appendDecisionEvent, buildDecisionEvent, countEvents, readLastEvent, summarizeEvent } from "./laya-routing/telemetry";
+import { LayaDaemonTransport, resolveRuntimePaths, type DaemonStatus, type RuntimePaths } from "./laya-routing/transport";
 import type { BypassReason, DecisionClient, DecisionResult } from "./laya-routing/types";
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
-
-export interface BridgeProbe {
-	available: boolean;
-	compliant: boolean;
-	packageVersion?: string;
-	model?: string;
-	revision?: string;
-	cached?: boolean;
-	reason?: string;
-}
 
 export interface LayaRoutingDeps {
 	env?: Env;
 	configFile?: string;
 	telemetryFile?: string;
-	bridgePath?: string;
-	/** Injectable seams for tests: config loading, classifier, telemetry, clock. */
+	daemonPath?: string;
+	runtimePaths?: RuntimePaths;
+	/** Injectable seams for tests: config loading, classifier, transport, telemetry, clock. */
 	loadConfig?: (path: string) => ConfigLoad;
 	client?: DecisionClient;
-	exec?: BridgeExec;
+	transport?: LayaDaemonTransport;
 	appendEvent?: (event: Record<string, unknown>) => void;
-	probe?: () => Promise<BridgeProbe>;
 	now?: () => number;
 	newId?: () => string;
 }
@@ -92,15 +87,41 @@ export function registerLayaRouting(pi: ExtensionAPI, deps: LayaRoutingDeps = {}
 
 	const configFile = deps.configFile ?? defaultConfigPath(env);
 	const telemetryFile = deps.telemetryFile ?? defaultTelemetryPath(env);
-	const bridgePath = deps.bridgePath ?? join(MODULE_DIR, "laya-routing", "bridge.py");
+	const daemonPath = deps.daemonPath ?? join(MODULE_DIR, "laya-routing", "daemon.py");
+	const paths = deps.runtimePaths ?? resolveRuntimePaths(env);
 	const loadCfg = deps.loadConfig ?? ((path: string) => loadConfig(path, env));
 	const now = deps.now ?? (() => Date.now());
 	const newId = deps.newId ?? (() => randomUUID());
 	const append = deps.appendEvent ?? ((event: Record<string, unknown>) => appendDecisionEvent(telemetryFile, event));
-	const client = deps.client ?? createLayaProcessClient({ bridgePath, config: () => loadCfg(configFile).config, now });
+	const transport =
+		deps.transport ??
+		new LayaDaemonTransport({
+			daemonPath,
+			paths,
+			env,
+			python: () => loadCfg(configFile).config.python,
+			graceMs: () => loadCfg(configFile).config.shutdownGraceMs,
+		});
+	const client = deps.client ?? createDaemonDecisionClient({ transport, config: () => loadCfg(configFile).config, now });
 
 	let turn: TurnState | null = null;
 	let lastStatus: string | undefined;
+
+	/** Connect (or start) the daemon for a non-off mode; never blocks a turn. */
+	const ensureRuntime = (): void => {
+		if (loadCfg(configFile).config.mode === "off") return;
+		void transport.ensureConnected();
+	};
+
+	pi.on("session_start", () => {
+		ensureRuntime();
+	});
+
+	// Docs contract: close session-scoped resources from an idempotent
+	// shutdown handler (quit, reload and session replacement all fire it).
+	pi.on("session_shutdown", () => {
+		transport.close();
+	});
 
 	/**
 	 * One turn record per accepted root user input. Steering a running turn
@@ -129,6 +150,7 @@ export function registerLayaRouting(pi: ExtensionAPI, deps: LayaRoutingDeps = {}
 		};
 
 		if (intent !== null) state.bypass = intent;
+		else if (lowInformation(text)) state.bypass = "low_information";
 		else if (text.length === 0) state.bypass = "unusable_input";
 		else {
 			state.decision = Promise.resolve()
@@ -217,57 +239,46 @@ export function registerLayaRouting(pi: ExtensionAPI, deps: LayaRoutingDeps = {}
 		lastStatus = summarizeEvent(event);
 	}
 
-	async function probeLaya(): Promise<BridgeProbe> {
-		if (deps.probe) return deps.probe();
-		const config: LayaRoutingConfig = loadCfg(configFile).config;
-		const run = await (deps.exec ?? execBridge)({
-			python: config.python,
-			bridgePath,
-			request: "",
-			args: ["--probe"],
-			timeoutMs: Math.max(20_000, config.timeoutMs),
-		});
-		try {
-			const payload = JSON.parse(run.stdout.trim()) as Record<string, unknown>;
-			return {
-				available: payload.available === true,
-				compliant: payload.compliant === true,
-				packageVersion: typeof payload.package_version === "string" ? payload.package_version : undefined,
-				model: typeof payload.model === "string" ? payload.model : undefined,
-				revision: typeof payload.revision === "string" ? payload.revision : undefined,
-				cached: typeof payload.cached === "boolean" ? payload.cached : undefined,
-				reason: typeof payload.reason === "string" ? payload.reason : undefined,
-			};
-		} catch {
-			return { available: false, compliant: false, reason: run.timedOut ? "timeout" : "bridge unreachable" };
-		}
-	}
-
 	async function statusText(): Promise<string> {
 		const loaded = loadCfg(configFile);
 		const config = loaded.config;
 		const lines = [
 			`laya-routing: mode=${config.mode}${loaded.exists ? "" : " (no config file, using defaults)"}`,
 			`config: ${configFile}`,
-			`gate: threshold=${config.confidenceThreshold} timeoutMs=${config.timeoutMs} advisoryBudgetMs=${config.advisoryBudgetMs} python=${config.python}`,
-			`bridge: ${bridgePath}`,
+			`gate: threshold=${config.confidenceThreshold} timeoutMs=${config.timeoutMs} advisoryBudgetMs=${config.advisoryBudgetMs} gracefulShutdownMs=${config.shutdownGraceMs}`,
+			`daemon: ${daemonPath}`,
 		];
 		const count = countEvents(telemetryFile);
 		lines.push(`telemetry: ${telemetryFile}${count === undefined ? "" : ` (${count} events)`}`);
 		if (loaded.error) lines.push(`config error: ${loaded.error}`);
 		for (const warning of loaded.warnings) lines.push(`config warning: ${warning}`);
 
-		let probe: BridgeProbe;
+		let status: DaemonStatus | undefined;
 		try {
-			probe = await probeLaya();
-		} catch (cause) {
-			probe = { available: false, compliant: false, reason: cause instanceof Error ? cause.message : "probe failed" };
+			status = await transport.status(5_000);
+		} catch {
+			status = undefined;
 		}
-		lines.push(
-			probe.available
-				? `laya: available (package ${probe.packageVersion ?? "?"}, model ${probe.model ?? "?"}@${shortRevision(probe.revision)}, cached=${probe.cached ?? "unknown"})`
-				: `laya: unavailable (${probe.reason ?? "unknown"})`,
-		);
+		if (!status) {
+			lines.push(`laya: ${config.mode === "off" ? "not connected (mode=off)" : "daemon unavailable (fail-open)"}`);
+		} else {
+			const checkpoints = status.checkpoints.map((entry) => `${entry.id}${entry.subfolder ? `:${entry.subfolder}` : ""}`).join(",");
+			lines.push(
+				`daemon: id=${status.daemonId} pid=${status.pid} state=${status.state} clients=${status.clientCount} uptime=${formatDuration(status.uptimeMs)} router=${status.router ?? "?"} backend=${status.backend ?? "?"}`,
+			);
+			lines.push(`checkpoints: ${checkpoints}${status.packageVersion ? ` (laya ${status.packageVersion})` : ""}`);
+			if (status.loadedMs) {
+				const loadedParts = Object.entries(status.loadedMs).map(([id, ms]) => `${id}=${ms}ms`);
+				if (loadedParts.length > 0) lines.push(`model load: ${loadedParts.join(" ")}`);
+			}
+			if (status.grace.pending) lines.push(`shutdown grace: ${status.grace.remainingMs ?? "?"} ms remaining`);
+			if (status.error) lines.push(`daemon error: ${status.error.error}${status.error.detail ? ` (${status.error.detail})` : ""}`);
+			if (status.last) {
+				const last = status.last as Record<string, unknown>;
+				if (typeof last.error === "string") lines.push(`last classification: failed (${last.error})`);
+				else lines.push(`last classification: language=${last.language ?? "?"} checkpoint=${last.checkpoint ?? "?"} purpose=${last.purpose ?? "?"} latency=${last.latency_ms ?? "?"}ms`);
+			}
+		}
 
 		const fromMemory = lastStatus;
 		const fromFile = fromMemory ?? (readLastEvent(telemetryFile) ? summarizeEvent(readLastEvent(telemetryFile) as Record<string, unknown>) : undefined);
@@ -288,6 +299,10 @@ export function registerLayaRouting(pi: ExtensionAPI, deps: LayaRoutingDeps = {}
 				}
 				try {
 					saveConfig(configFile, { ...loadCfg(configFile).config, mode: value });
+					// `off` genuinely disconnects this instance; shadow/advise
+					// reconnect (and start the daemon on first use).
+					if (value === "off") transport.close();
+					else void transport.ensureConnected();
 					ctx.ui.notify(`laya-routing: mode=${value} (${configFile})`, "info");
 				} catch (cause) {
 					ctx.ui.notify(`laya-routing: could not write ${configFile}: ${cause instanceof Error ? cause.message : String(cause)}`, "error");
@@ -354,6 +369,12 @@ export function withBudget<T>(promise: Promise<T>, budgetMs: number): Promise<T 
 	});
 }
 
-function shortRevision(revision: string | undefined): string {
-	return revision && revision.length > 8 ? revision.slice(0, 8) : (revision ?? "?");
+function formatDuration(ms: number): string {
+	const total = Math.max(0, Math.floor(ms / 1000));
+	const hours = Math.floor(total / 3600);
+	const minutes = Math.floor((total % 3600) / 60);
+	const seconds = total % 60;
+	if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+	if (minutes > 0) return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+	return `${seconds}s`;
 }

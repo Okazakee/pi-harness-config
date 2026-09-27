@@ -38,7 +38,7 @@ export interface DecisionEventInput {
 export function buildDecisionEvent(input: DecisionEventInput): Record<string, unknown> {
 	const ok = input.result?.ok === true ? input.result.decision : undefined;
 	return {
-		schema_version: 1,
+		schema_version: 2,
 		ts: new Date(input.at).toISOString(),
 		event_id: input.id,
 		mode: input.mode,
@@ -53,12 +53,16 @@ export function buildDecisionEvent(input: DecisionEventInput): Record<string, un
 					revision: ok.classifier.revision ?? null,
 				}
 			: null,
+		runtime: { daemon_id: ok?.daemonId ?? null },
 		laya: ok
 			? {
 					purpose: ok.purpose,
 					answer_confidence: ok.answerConfidence,
 					confidence: ok.confidence ?? null,
+					language: ok.language ?? null,
+					checkpoint: ok.checkpoint ?? null,
 					latency_ms: ok.latencyMs,
+					transport_ms: ok.transportMs ?? null,
 				}
 			: null,
 		hint: { threshold: input.threshold, injected: input.injected },
@@ -74,6 +78,8 @@ export function summarizeEvent(event: Record<string, unknown>): string {
 	if (event.bypass) parts.push(`bypass=${String(event.bypass)}`);
 	if (event.failure) parts.push(`failure=${String(event.failure)}`);
 	if (laya) {
+		if (laya.language) parts.push(`language=${String(laya.language)}`);
+		if (laya.checkpoint) parts.push(`checkpoint=${String(laya.checkpoint)}`);
 		parts.push(`purpose=${String(laya.purpose)}`);
 		parts.push(`answer_confidence=${String(laya.answer_confidence)}`);
 		parts.push(`latency_ms=${String(laya.latency_ms)}`);

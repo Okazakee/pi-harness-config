@@ -32,7 +32,11 @@ export type FailureReason =
 	| "exception";
 
 /** Reasons a turn never reaches the classifier. */
-export type BypassReason = "explicit_delegation" | "explicit_no_delegation" | "unusable_input";
+export type BypassReason =
+	| "explicit_delegation"
+	| "explicit_no_delegation"
+	| "low_information"
+	| "unusable_input";
 
 export interface RoutingInput {
 	/** Bounded, sanitized raw user prompt. */
@@ -55,8 +59,16 @@ export interface RoutingDecision {
 	/** Laya's entropy-derived `confidence`. Recorded for comparison, never gated on. */
 	confidence?: number;
 	probabilities?: Record<string, number>;
+	/** Language selected by the runtime's router; undefined when it was uncertain. */
+	language?: string;
+	/** Checkpoint id that answered (telemetry uses it to prove warm reuse). */
+	checkpoint?: string;
+	/** Shared daemon instance that served this decision. */
+	daemonId?: string;
+	/** Client-observed round trip, including transport (daemon inference is `latencyMs`). */
+	transportMs?: number;
 	classifier: ClassifierInfo;
-	/** Wall time of the whole bridge invocation, interpreter start included. */
+	/** Model inference time as measured by the daemon. */
 	latencyMs: number;
 }
 
