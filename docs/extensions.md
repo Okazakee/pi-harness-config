@@ -46,12 +46,12 @@ While an override is active, tool inputs are rewritten:
 - `grep` / `find` / `ls` resolve `path`, or default their scope to it.
 - Absolute paths are never touched.
 
-The session directory itself does not change, so the footer would otherwise
+The session directory itself does not change, so the statusline would otherwise
 show the wrong directory. `statusline.ts` renders the effective directory as an
-extra segment whenever an override is active.
+extra segment in the top bar whenever an override is active.
 
 Limits worth knowing: tools registered by other extensions (lsp, subagent, mcp)
-are not rewritten, and the git branch in the footer still reflects the session
+are not rewritten, and the git branch in the top bar still reflects the session
 directory. Tests: `scripts/test-cwd-switch.sh`.
 
 ## Execution scoping (`/todo`)
@@ -118,11 +118,34 @@ DCP keeps `todo` results protected, so their model-facing text stays small.
 
 Tests: `scripts/test-todo.sh`.
 
-## Provider usage in the footer
+## Statusline layout
+
+[`pi/extensions/statusline.ts`](../pi/extensions/statusline.ts) builds a
+two-row statusline. The top bar is a widget above the editor and stays visible
+while the footer is replaced by the pinned rows below the editor:
+
+```text
+<pi> 1h 42m · <spinner> 3m 07s          ~/proj (main)
+DeepSeek V4.1 Flash · max · 2.4%/1M · CH87%    <bolt> Command Code · 5h 0% (4h 51m) · 7d 5% (5d 14h) · mo 5% (25d)
+```
+
+- Top bar, left: total Pi process time followed by the current task's timer
+  (spinner while working, `✓` after a task, `○` before the first one).
+- Top bar, right: session directory, the `/cd` effective directory when active,
+  and the git branch.
+- Footer, left: model name, thinking level, context-window usage and cache-hit
+  rate. Command Code's `(CC)` catalog suffix is dropped because the provider is
+  already named on the right.
+- Footer, right: the active provider's usage windows.
+
+Pi's built-in working row is hidden; the top bar already shows the spinner next
+to the timings, so keeping both would render two spinners.
+
+## Provider usage in the statusline
 
 [`pi/extensions/statusline.ts`](../pi/extensions/statusline.ts) renders the
 active subscription provider's windows as a compact `tier · label X% (reset)`
-segment, right-aligned in the custom footer. The parsers and the request shape
+segment, right-aligned in the footer. The parsers and the request shape
 live in [`pi/extensions/statusline/usage.ts`](../pi/extensions/statusline/usage.ts):
 
 - **OpenCode Go** (`opencode-go`) — `GET <baseUrl>/v1/usage`, rendering the
@@ -131,14 +154,20 @@ live in [`pi/extensions/statusline/usage.ts`](../pi/extensions/statusline/usage.
   `https://chatgpt.com/backend-api/wham/usage` route, rendering the primary and
   secondary rate-limit windows with labels derived from their reported length.
 - **Command Code** (`commandcode`) — the pinned
-  `https://api.commandcode.ai/alpha/billing/credits` route, rendering the
-  five-hour and weekly credit windows (`used`/`cap`) as `5h` / `7d`.
+  `https://api.commandcode.ai/alpha/billing/credits` route renders the
+  five-hour and weekly credit windows (`used`/`cap`) as `5h` / `7d`. The
+  monthly window is derived from two more pinned routes fetched in parallel:
+  `/alpha/usage/summary` (credits spent in the billing period) and
+  `/alpha/billing/subscriptions` (period end for the countdown). Its cap is
+  `spent + remaining monthly/purchased/free credits`, the same "used of pool"
+  shape the provider package reports, so it renders as `mo X% (reset)`.
 
 Fetches are best-effort and reuse the credential Pi already stores for the
-provider; on any failure the segment is hidden and the last good snapshot is
-kept. Each credential is only ever sent to its provider's pinned origin,
-redirects are refused, and the ChatGPT account id is read from the OAuth
-token's `chatgpt_account_id` claim. No credential is ever printed.
+provider; on any failure the affected window (or the whole segment) is hidden,
+the last good snapshot is kept, and a missing summary/renewal route only drops
+the derived monthly window. Each credential is only ever sent to its provider's
+pinned origin, redirects are refused, and the ChatGPT account id is read from
+the OAuth token's `chatgpt_account_id` claim. No credential is ever printed.
 
 Tests: `scripts/test-statusline.sh`.
 

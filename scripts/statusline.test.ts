@@ -12,11 +12,14 @@ import { existsSync } from "node:fs"
 
 import {
 	COMMANDCODE_CREDITS_URL,
+	COMMANDCODE_SUBSCRIPTIONS_URL,
 	COMMANDCODE_TIER,
+	COMMANDCODE_USAGE_SUMMARY_URL,
 	ICON_USAGE,
 	OPENAI_CODEX_USAGE_URL,
 	OPENCODE_GO_TIER,
 	codexAccountId,
+	commandCodeResetIso,
 	fetchCodexUsage,
 	fetchCommandCodeUsage,
 	fetchOpencodeGoUsage,
@@ -27,6 +30,7 @@ import {
 	parseOpencodeGoUsage,
 	planTypeDisplay,
 	readCodexWindow,
+	readCommandCodeMonthlyWindow,
 	readCommandCodeWindow,
 	readWindow,
 	renderUsage,
@@ -54,6 +58,18 @@ function fakeFetch(body: unknown, ok = true): { impl: typeof fetch; calls: Fetch
 	const impl = (async (url: string | URL | Request, init?: RequestInit) => {
 		calls.push({ url: String(url), init })
 		return { ok, status: ok ? 200 : 401, json: async () => body } as Response
+	}) as typeof fetch
+	return { impl, calls }
+}
+
+/** Route each URL to its own body; unknown routes answer 401. */
+function fakeFetchByUrl(bodies: Record<string, unknown>): { impl: typeof fetch; calls: FetchCall[] } {
+	const calls: FetchCall[] = []
+	const impl = (async (url: string | URL | Request, init?: RequestInit) => {
+		const href = String(url)
+		calls.push({ url: href, init })
+		const body = bodies[href]
+		return { ok: body !== undefined, status: body !== undefined ? 200 : 401, json: async () => body } as Response
 	}) as typeof fetch
 	return { impl, calls }
 }
@@ -333,12 +349,71 @@ describe("readCommandCodeWindow", () => {
 	test("accepts epoch-second resets from older payloads", () => {
 		expect(readCommandCodeWindow({ used: 1, cap: 14, resetAt: NOW / 1000 })?.resetsAt).toBe(iso(0))
 	})
+	test("accepts the ISO period ends the subscription payload carries", () => {
+		expect(commandCodeResetIso(iso(3_600_000))).toBe(iso(3_600_000))
+		expect(commandCodeResetIso("not-a-date")).toBeUndefined()
+	})
 	test("rejects unusable windows", () => {
 		expect(readCommandCodeWindow({ used: -1, cap: 14 })).toBeUndefined()
 		expect(readCommandCodeWindow({ used: 1, cap: 0 })).toBeUndefined()
 		expect(readCommandCodeWindow({ used: 1 })).toBeUndefined()
 		expect(readCommandCodeWindow("nope")).toBeUndefined()
 		expect(readCommandCodeWindow(undefined)).toBeUndefined()
+	})
+})
+
+// ── monthly window (summary + subscription payloads) ──────────────────────
+
+const COMMANDCODE_CREDITS = {
+	credits: { monthlyCredits: 66.31, purchasedCredits: 2, freeCredits: 1.69 },
+	windowLimits: {
+		fiveHour: { used: 0, cap: 14, resetAt: 0 },
+		weekly: { used: 1.6993372239, cap: 35, resetAt: NOW + 3 * 86_400_000 },
+	},
+}
+const COMMANDCODE_SUMMARY = { totalMonthlyCredits: 10, totalCost: 10, periodBasis: "billing-period" }
+const COMMANDCODE_SUBSCRIPTION = { data: { currentPeriodEnd: iso(10 * 86_400_000) } }
+
+// remaining = 66.31 + 2 + 1.69 = 70; spent = 10 → cap 80 → 12.5%
+const MONTHLY_PERCENT = (10 / 80) * 100
+
+describe("readCommandCodeMonthlyWindow", () => {
+	test("derives the percent from spent over spend + remaining credits", () => {
+		const window = readCommandCodeMonthlyWindow(COMMANDCODE_CREDITS, {
+			summary: COMMANDCODE_SUMMARY,
+			subscription: COMMANDCODE_SUBSCRIPTION,
+		})
+		expect(window?.percent).toBeCloseTo(MONTHLY_PERCENT, 6)
+		expect(window?.resetsAt).toBe(iso(10 * 86_400_000))
+		expect(window?.status).toBe("ok")
+	})
+	test("falls back to the summary's cost totals", () => {
+		expect(
+			readCommandCodeMonthlyWindow(COMMANDCODE_CREDITS, { summary: { totalCost: 10 } })?.percent,
+		).toBeCloseTo(MONTHLY_PERCENT, 6)
+		expect(
+			readCommandCodeMonthlyWindow(COMMANDCODE_CREDITS, { summary: { totalCredits: 10 } })?.percent,
+		).toBeCloseTo(MONTHLY_PERCENT, 6)
+	})
+	test("stays renderable without a subscription, just without a countdown", () => {
+		const window = readCommandCodeMonthlyWindow(COMMANDCODE_CREDITS, { summary: COMMANDCODE_SUMMARY })
+		expect(window?.percent).toBeCloseTo(MONTHLY_PERCENT, 6)
+		expect(window?.resetsAt).toBeUndefined()
+	})
+	test("clamps overage to 100%", () => {
+		const window = readCommandCodeMonthlyWindow(
+			{ credits: { monthlyCredits: 0 } },
+			{ summary: { totalMonthlyCredits: 80 } },
+		)
+		expect(window?.percent).toBe(100)
+	})
+	test("rejects payloads without a spend total or with an empty pool", () => {
+		expect(readCommandCodeMonthlyWindow(COMMANDCODE_CREDITS, {})).toBeUndefined()
+		expect(readCommandCodeMonthlyWindow(COMMANDCODE_CREDITS, { summary: {} })).toBeUndefined()
+		expect(
+			readCommandCodeMonthlyWindow({ credits: { monthlyCredits: 0 } }, { summary: { totalCost: 0 } }),
+		).toBeUndefined()
+		expect(readCommandCodeMonthlyWindow({}, { summary: { totalCost: 1 } })).toBeUndefined()
 	})
 })
 
@@ -352,6 +427,21 @@ describe("parseCommandCodeUsage", () => {
 		])
 		expect(snapshot?.windows[0].window.percent).toBe(0)
 		expect(snapshot?.windows[1].window.percent).toBeCloseTo(4.855249211, 6)
+	})
+	test("appends the derived monthly window after 5h/7d", () => {
+		const snapshot = parseCommandCodeUsage(COMMANDCODE_CREDITS, {
+			summary: COMMANDCODE_SUMMARY,
+			subscription: COMMANDCODE_SUBSCRIPTION,
+		})
+		expect(snapshot?.windows.map((entry) => [entry.label, entry.unit, entry.floor])).toEqual([
+			["5h", "m", false],
+			["7d", "h", false],
+			["mo", "h", true],
+		])
+		expect(snapshot?.windows[2].window.resetsAt).toBe(iso(10 * 86_400_000))
+	})
+	test("keeps the monthly window out when the extra payloads are absent", () => {
+		expect(parseCommandCodeUsage(COMMANDCODE_CREDITS)?.windows.map((entry) => entry.label)).toEqual(["5h", "7d"])
 	})
 	test("skips malformed windows and rejects an empty payload", () => {
 		expect(parseCommandCodeUsage({ windowLimits: { fiveHour: { used: 500, cap: 0, resetAt: 0 } } })).toBeUndefined()
@@ -368,13 +458,42 @@ describe("fetchCommandCodeUsage", () => {
 	test("pins the Command Code origin, refuses redirects and sends the bearer credential", async () => {
 		const { impl, calls } = fakeFetch(COMMANDCODE_PAYLOAD)
 		await fetchCommandCodeUsage("secret-key", { fetchImpl: impl, timeoutMs: 50 })
-		expect(calls[0].url).toBe(COMMANDCODE_CREDITS_URL)
-		expect(calls[0].url.startsWith("https://api.commandcode.ai/alpha/")).toBe(true)
-		expect(calls[0].init?.headers).toEqual({
-			accept: "application/json",
-			authorization: "Bearer secret-key",
+		expect(calls.map((call) => call.url)).toEqual([
+			COMMANDCODE_CREDITS_URL,
+			COMMANDCODE_USAGE_SUMMARY_URL,
+			COMMANDCODE_SUBSCRIPTIONS_URL,
+		])
+		for (const call of calls) {
+			expect(call.url.startsWith("https://api.commandcode.ai/alpha/")).toBe(true)
+			expect(call.init?.headers).toEqual({
+				accept: "application/json",
+				authorization: "Bearer secret-key",
+			})
+			expect(call.init?.redirect).toBe("error")
+		}
+	})
+	test("derives the monthly window from the summary and subscription payloads", async () => {
+		const { impl } = fakeFetchByUrl({
+			[COMMANDCODE_CREDITS_URL]: COMMANDCODE_CREDITS,
+			[COMMANDCODE_USAGE_SUMMARY_URL]: COMMANDCODE_SUMMARY,
+			[COMMANDCODE_SUBSCRIPTIONS_URL]: COMMANDCODE_SUBSCRIPTION,
 		})
-		expect(calls[0].init?.redirect).toBe("error")
+		const snapshot = await fetchCommandCodeUsage("secret-key", { fetchImpl: impl, timeoutMs: 50 })
+		expect(snapshot?.windows.map((entry) => entry.label)).toEqual(["5h", "7d", "mo"])
+		expect(snapshot?.windows[2].window.resetsAt).toBe(iso(10 * 86_400_000))
+	})
+	test("keeps the 5h/7d windows when the monthly routes fail", async () => {
+		const { impl } = fakeFetchByUrl({ [COMMANDCODE_CREDITS_URL]: COMMANDCODE_PAYLOAD })
+		const snapshot = await fetchCommandCodeUsage("secret-key", { fetchImpl: impl, timeoutMs: 50 })
+		expect(snapshot?.windows.map((entry) => entry.label)).toEqual(["5h", "7d"])
+	})
+	test("survives a rejecting monthly request", async () => {
+		const impl = (async (url: string | URL | Request) => {
+			if (String(url) !== COMMANDCODE_CREDITS_URL) throw new Error("offline")
+			return { ok: true, status: 200, json: async () => COMMANDCODE_PAYLOAD } as Response
+		}) as typeof fetch
+		const snapshot = await fetchCommandCodeUsage("secret-key", { fetchImpl: impl, timeoutMs: 50 })
+		expect(snapshot?.windows.map((entry) => entry.label)).toEqual(["5h", "7d"])
 	})
 	test("hides the segment on a non-OK response", async () => {
 		const { impl } = fakeFetch({}, false)
