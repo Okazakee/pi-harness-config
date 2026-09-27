@@ -1,0 +1,7 @@
+{
+  "mode": "shadow",
+  "confidenceThreshold": 0.8,
+  "timeoutMs": 20000,
+  "advisoryBudgetMs": 800,
+  "shutdownGraceMs": 300000
+}

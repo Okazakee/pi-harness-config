@@ -9,11 +9,12 @@ not listed here are intentionally excluded.
 | `pi/settings.json` | `~/.pi/agent/settings.json` |
 | `pi/dcp.jsonc` | `~/.pi/agent/dcp.jsonc` |
 | `pi/pi-lsp.json` | `~/.pi/agent/pi-lsp.json` |
+| `pi/laya-routing.json` | `~/.pi/agent/laya-routing.json` |
 | `pi/keybindings.json` | `~/.pi/agent/keybindings.json` |
 | `pi/patch-pi-renderer.py` | `~/.pi/agent/patch-pi-renderer.py` |
 | `pi/logo.png` | `~/.pi/agent/logo.png` |
 | `pi/agents/` | `~/.pi/agent/agents/` (`*.md`) |
-| `pi/extensions/` | `~/.pi/agent/extensions/` (recursive; `todo.ts` plus the `todo/` helper modules) |
+| `pi/extensions/` | `~/.pi/agent/extensions/` (recursive; `todo.ts` plus the `todo/` helper modules, and the `laya-routing` bridge/lock) |
 | `pi/themes/` | `~/.pi/agent/themes/` (`*.json`) |
 | `pi/skills/` | `~/.pi/agent/skills/` (recursive) |
 | `mcp/mcp.json` | `~/.config/mcp/mcp.json` |
@@ -31,6 +32,10 @@ not listed here are intentionally excluded.
 | `~/.pi/agent/git/` | Git package cache — re-cloned at the exact commits pinned in `settings.json` |
 | `~/.pi/agent/models-store.json` | Regenerable model catalog cache |
 | `~/.pi/agent/mcp-cache.json` | Regenerable MCP tool-metadata cache |
+| `$XDG_RUNTIME_DIR/pi-laya/` (socket, lock, pid, log) | Runtime state of the shared warm Laya daemon — recreated on the next start; in `/tmp/pi-laya-<uid>` when `XDG_RUNTIME_DIR` is unset |
+| `$XDG_STATE_HOME/pi/laya-routing/decisions.jsonl` | Privacy-safe local shadow telemetry for the delegation advisor — experiment data, never config |
+| `~/.local/share/pi-laya/` | Optional local Laya python environment (venv) — installed by hand from the pin in `pi/extensions/laya-routing/laya.lock.json` |
+| `~/.cache/huggingface/` | Model weight cache — downloaded at the pinned revision and SHA-256 verified by the daemon before load |
 | `~/.local/bin/obscura`, `obscura-worker` | obscura MCP browser binaries — reinstalled by `restore.sh` from the exact release pinned in `deps/obscura.lock.json` (SHA-256 verified before extraction) |
 | `~/.pi/agent/__pycache__/` | Python bytecode |
 

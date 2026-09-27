@@ -66,6 +66,7 @@ scripts/test-obscura-restore.sh    # Obscura lock + checksum logic
 scripts/test-cwd-switch.sh         # /cd extension unit + wiring tests
 scripts/test-statusline.sh         # provider-usage parsers + statusline rendering
 scripts/test-todo.sh               # /todo extension unit + wiring tests
+scripts/test-laya-routing.sh       # Laya delegation-advisor unit + wiring tests
 scripts/test-secret-loader.sh       # agent-dir secret loader tests
 scripts/test-versions.sh           # version drift and preflight logic
 ```

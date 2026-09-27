@@ -125,15 +125,17 @@ two-row statusline. The top bar is a widget above the editor and stays visible
 while the footer is replaced by the pinned rows below the editor:
 
 ```text
-<spinner> 3m 07s    <folder> ~/proj <branch> main     (working)
-<pi> 24m            <folder> ~/proj <branch> main     (idle)
+<spinner> 3m 07s        <folder> ~/proj <branch> main     (working)
+<pi> 24m <history> 3m   <folder> ~/proj <branch> main     (idle: total + last run)
 Command Code · DeepSeek V4.1 Flash · max · 2.4%/1M · CH87%    <bolt> 5h 0% (4h 51m) · 7d 5% (5d 14h) · mo 5% (25d)
 ```
 
-- Top bar, left: one timing entity at a time — the spinner plus the current
-  run's timer while working, and the pi glyph plus the accumulated agent-work
-  time (the sum of every run, so idle time while Pi sits open never counts)
-  when idle.
+- Top bar, left: while working, a single value — the spinner plus the current
+  run's timer. When idle, the pi glyph plus the accumulated agent-work time
+  (the sum of every run, so idle time while Pi sits open never counts),
+  followed by a history glyph plus the last completed run's duration. The
+  timer state lives on `globalThis`, so `/reload` keeps the totals and a
+  running task's start time instead of resetting them.
 - Top bar, right: a folder glyph before the session directory, the `/cd`
   effective directory when active (same glyph, accent color), and a
   git-branch glyph before the branch.
@@ -177,6 +179,112 @@ pinned origin, redirects are refused, and the ChatGPT account id is read from
 the OAuth token's `chatgpt_account_id` claim. No credential is ever printed.
 
 Tests: `scripts/test-statusline.sh`.
+
+## Laya routing advisor (`/laya-routing`)
+
+[`pi/extensions/laya-routing.ts`](../pi/extensions/laya-routing.ts) adds a
+small advisory classifier for discretionary specialist delegation in root
+sessions. Laya is not an agent: it makes one typed decision per user turn —
+would auxiliary context help, and of what kind — and Pi stays free to ignore
+it.
+
+```text
+user prompt
+    |
+    +--> deterministic bypass?  (explicit delegation / no-delegation /
+    |                            low-information continuation / delegated
+    |                            session / off mode / unusable input)
+    |
+    +--> language routing (Laya detect_language; uncertain -> English)
+             |
+             v
+       shared warm daemon: english checkpoints | multilingual checkpoint
+             |
+             v
+       typed purpose decision
+             |
+             v
+       confidence gate (answer_confidence)
+             |
+             v
+   request-local <delegation_hint> in advise mode
+             |
+             v
+   the model decides: explore / research / architect / nobody
+```
+
+- **Modes** (`pi/laya-routing.json`, `off` / `shadow` / `advise`, default
+  `shadow`): `off` is genuinely inert — no connect, no spawn, no models, no
+  telemetry (and `/laya-routing mode off` disconnects a running instance);
+  `shadow` classifies and records telemetry without injecting anything;
+  `advise` injects the hint when `answer_confidence` clears the gate.
+  `/laya-routing status` shows mode, daemon state, checkpoints, grace and the
+  last classification; `/laya-routing mode <x>` writes the config file.
+- **Semantics stay abstract from agent names.** The classifier answers a
+  `purpose` enum (`none`, `local_context`, `external_context`, `architecture`)
+  and the deterministic mapping lives in code: `local_context -> explore`,
+  `external_context -> research`, `architecture -> architect`, `none -> no
+  recommendation`.
+- **Request-local only.** The hint is a `role: "custom"`, `display: false`
+  message appended in the `context` event — the same mechanism as the todo
+  nudge — so it is never written back to the session transcript. Explicit user
+  intent always wins, and a hint can never trigger delegation by itself.
+- **Runtime: one shared warm daemon per user.**
+  [`pi/extensions/laya-routing/daemon.py`](../pi/extensions/laya-routing/daemon.py)
+  is started by the first root Pi that needs it and owns a user-private Unix
+  socket under `$XDG_RUNTIME_DIR/pi-laya` (fallback `/tmp/pi-laya-<uid>`; dir
+  0700, socket 0600). It loads both checkpoints once and serializes inference.
+  The socket connection *is* the lease: `session_start` connects (starting the
+  daemon on first use), `session_shutdown` (quit, reload or session
+  replacement) closes idempotently, and the daemon counts connected clients.
+  With zero clients it arms the shutdown timer (`shutdownGraceMs`, default
+  `300000`); a reconnect cancels it; expiry frees all model RAM and removes
+  the socket. Idle Pi sessions keep the models resident, every Pi instance
+  shares the same daemon, and no Pi ever reloads a model per prompt.
+  A flock singleton plus the socket bind handle startup races; stale sockets
+  are unlinked only while holding the lock.
+- **Language routing and checkpoints.** Both stay resident for the daemon
+  lifetime: `english` = `typed-decisions/`, `multilingual` = `multilingual/`.
+  Selection uses Laya's own dependency-free `detect_language`; uncertain or
+  short prompts default to English. `scripts/laya-routing-eval.py` scored the
+  candidates on the synthetic 44-prompt fixture
+  (`scripts/laya-routing-fixture.json`), English accuracy first: the
+  `typed-decisions` checkpoint won 12/16 vs 11/16 (base root) and 10/16
+  (multilingual), so it is the English checkpoint, while `multilingual`
+  remains the Italian-capable one. Zero-shot accuracy is modest
+  (`external_context` is the weakest class), which is exactly why the rollout
+  default is `shadow`: the hints are measured before they influence anything.
+- **Integrity.** The pinned revision is enforced: the daemon downloads
+  `convaiinnovations/laya` at the lock's revision through
+  `huggingface_hub` and loads the local snapshot path. Each checkpoint's
+  `model.safetensors` sha256 is hashed before load and a mismatch degrades the
+  daemon instead of serving. The installed `laya` version must equal the pin.
+  The wheel digest in the lock is informational: pip resolves the pinned
+  version from PyPI without hash mode, because locking the whole torch graph
+  is out of scope. Weights stay in the huggingface cache and are never copied
+  into the repository.
+- **Fail-open.** A missing runtime or model, wrong pinned version, timeout,
+  malformed payload, invalid enum, language-routing failure or unexpected
+  exception produces no hint and a telemetry reason. A daemon crash is
+  reconnected (or restarted) on the next classification attempt, bounded by a
+  spawn cooldown so a broken runtime cannot loop.
+- **Shadow telemetry.** One JSONL event per root turn (schema 2) under
+  `$XDG_STATE_HOME/pi/laya-routing/decisions.jsonl` (default
+  `~/.local/state/pi/laya-routing/decisions.jsonl`) — outside the agent dir
+  and the backup repository. It records mode, language, checkpoint, daemon id,
+  inference and transport latency, the confidence-gate outcome, the
+  bypass/failure reason, and whether a `subagent` tool call was observed in
+  the same agent run, so repeated `daemon_id` values prove warm reuse. It
+  never records prompts, summaries, file names, tool payloads, source or
+  environment values. `changed_course` is not measured: Pi exposes no reliable
+  signal for it.
+- **Measured locally** (Ryzen AI 9 HX 370, CPU): socket ready in 61 ms; both
+  checkpoints ready in 5.3 s (`english` 2.97 s, `multilingual` 2.04 s);
+  3.36 GB RSS with both resident; warm round trip EN ~300 ms and IT ~111 ms,
+  comfortably inside the 800 ms advisory budget. `$XDG_RUNTIME_DIR/pi-laya/laya.log`
+  records load times, client connects/disconnects and grace arm/exit events.
+
+Tests: `scripts/test-laya-routing.sh`.
 
 ## Agent-dir secret loading (`secret-loader`)
 
