@@ -3,9 +3,9 @@
   "python_package": {
     "name": "laya",
     "version": "0.3.20",
-    "install": "python3 -m pip install laya==0.3.20",
+    "install": "python3 -m venv \"${XDG_DATA_HOME:-$HOME/.local/share}/pi-laya/venv\" && \"${XDG_DATA_HOME:-$HOME/.local/share}/pi-laya/venv/bin/pip\" install laya==0.3.20",
     "wheel_sha256": "6039e802fa5effb8dd492061cd7ad39a43087beadc4a4fa4a649614e77eb83d4",
-    "integrity": "informational: pip resolves the pinned version from PyPI without hash mode (locking the full torch graph is out of scope). The daemon enforces the installed version at startup and reports version_mismatch."
+    "integrity": "informational: pip resolves the pinned version from PyPI without hash mode (locking the full torch graph is out of scope). The daemon enforces the installed version at startup and reports version_mismatch. The interpreter defaults to \"${XDG_DATA_HOME:-$HOME/.local/share}/pi-laya/venv/bin/python\" and can be overridden with the portable-config `python` key."
   },
   "model": {
     "repo": "convaiinnovations/laya",

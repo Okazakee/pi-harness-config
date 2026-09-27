@@ -253,11 +253,15 @@ export function registerLayaRouting(pi: ExtensionAPI, deps: LayaRoutingDeps = {}
 		if (loaded.error) lines.push(`config error: ${loaded.error}`);
 		for (const warning of loaded.warnings) lines.push(`config warning: ${warning}`);
 
+		// `off` is inert: never touch the transport, whose status() would connect
+		// and could start the daemon. Report without a runtime call.
 		let status: DaemonStatus | undefined;
-		try {
-			status = await transport.status(5_000);
-		} catch {
-			status = undefined;
+		if (config.mode !== "off") {
+			try {
+				status = await transport.status(5_000);
+			} catch {
+				status = undefined;
+			}
 		}
 		if (!status) {
 			lines.push(`laya: ${config.mode === "off" ? "not connected (mode=off)" : "daemon unavailable (fail-open)"}`);

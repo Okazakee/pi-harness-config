@@ -18,7 +18,7 @@ import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { createDaemonDecisionClient, mapDaemonError } from "../pi/extensions/laya-routing/client"
-import { DEFAULT_CONFIG, defaultTelemetryPath, loadConfig, parseConfig, saveConfig } from "../pi/extensions/laya-routing/config"
+import { DEFAULT_CONFIG, defaultPythonPath, defaultTelemetryPath, loadConfig, parseConfig, saveConfig } from "../pi/extensions/laya-routing/config"
 import type { LayaRoutingConfig, LayaRoutingMode } from "../pi/extensions/laya-routing/config"
 import { explicitIntent, lowInformation } from "../pi/extensions/laya-routing/intent"
 import { MAX_PROMPT_CHARS, PURPOSE_SCHEMA, buildHintMessage, isAdviceWorthy, sanitizePrompt, specialistFor } from "../pi/extensions/laya-routing/routing"
@@ -334,6 +334,26 @@ describe("config parsing", () => {
 		expect(defaultTelemetryPath({ XDG_STATE_HOME: "/state" }, "/home/u")).toBe("/state/pi/laya-routing/decisions.jsonl")
 		expect(defaultTelemetryPath({}, "/home/u")).toBe("/home/u/.local/state/pi/laya-routing/decisions.jsonl")
 	})
+	test("derives the interpreter from XDG data home with a portable fallback", () => {
+		expect(defaultPythonPath({ XDG_DATA_HOME: "/xdg/data" }, "/home/u")).toBe("/xdg/data/pi-laya/venv/bin/python")
+		expect(defaultPythonPath({}, "/home/u")).toBe("/home/u/.local/share/pi-laya/venv/bin/python")
+		expect(defaultPythonPath({ XDG_DATA_HOME: "  " }, "/home/u")).toBe("/home/u/.local/share/pi-laya/venv/bin/python")
+		// The loader derives the default from the load environment, not the module env.
+		expect(loadConfig(join(tempRuntime(), "missing.json"), { XDG_DATA_HOME: "/xdg/data" }).config.python).toBe("/xdg/data/pi-laya/venv/bin/python")
+	})
+	test("an explicit interpreter overrides the derived default", () => {
+		const dir = tempRuntime()
+		const path = join(dir, "laya-routing.json")
+		writeFileSync(path, JSON.stringify({ mode: "shadow", python: "/opt/laya/python" }))
+		expect(parseConfig({ python: "/opt/laya/python" }).config.python).toBe("/opt/laya/python")
+		expect(loadConfig(path, { XDG_DATA_HOME: "/xdg/data" }).config.python).toBe("/opt/laya/python")
+	})
+	test("the tracked config stays portable (no machine-specific home path)", () => {
+		const raw = readFileSync(new URL("../pi/laya-routing.json", import.meta.url), "utf8")
+		expect(raw).not.toMatch(/\/home\//)
+		expect(raw).not.toMatch(/\/Users\//)
+		expect(Object.hasOwn(JSON.parse(raw), "python")).toBe(false)
+	})
 })
 
 // ================================================================ transport paths
@@ -608,6 +628,20 @@ describe("fail-open", () => {
 })
 
 describe("status command", () => {
+	test("off status never touches the transport and cannot start the daemon", async () => {
+		const { pi, transport } = harness({ mode: "off" })
+		const notifications: string[] = []
+		await pi.commands.get("laya-routing")?.handler("status", { ui: { notify: (message: string) => notifications.push(message) } })
+		expect(notifications[0]).toContain("mode=off")
+		expect(notifications[0]).toContain("not connected (mode=off)")
+		expect(transport.ensureConnectedCalls).toBe(0)
+		expect(transport.statusCalls).toBe(0)
+	})
+	test("status in shadow mode may inspect the daemon", async () => {
+		const { pi, transport } = harness({ mode: "shadow" })
+		await pi.commands.get("laya-routing")?.handler("status", { ui: { notify: () => {} } })
+		expect(transport.statusCalls).toBe(1)
+	})
 	test("reports mode, daemon state and telemetry", async () => {
 		const { pi } = harness({ mode: "advise" })
 		const notifications: string[] = []

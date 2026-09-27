@@ -42,7 +42,7 @@ export const DEFAULT_CONFIG: LayaRoutingConfig = {
 	confidenceThreshold: 0.8,
 	timeoutMs: 20_000,
 	advisoryBudgetMs: 800,
-	python: "python3",
+	python: defaultPythonPath(),
 	shutdownGraceMs: 300_000,
 };
 
@@ -62,6 +62,16 @@ export function defaultConfigPath(env: Env = process.env, home = homedir()): str
 	return join(agentDir(env, home), "laya-routing.json");
 }
 
+/**
+ * Portable default interpreter: the harness-managed Laya venv under XDG data
+ * home, falling back to `~/.local/share`. Tracked config never carries a
+ * machine-specific home path; an explicit `python` still overrides this.
+ */
+export function defaultPythonPath(env: Env = process.env, home = homedir()): string {
+	const dataHome = env.XDG_DATA_HOME?.trim() || join(home, ".local", "share");
+	return join(dataHome, "pi-laya", "venv", "bin", "python");
+}
+
 /** XDG state dir: telemetry never lives in the agent dir or the backup repo. */
 export function defaultTelemetryPath(env: Env = process.env, home = homedir()): string {
 	const base = env.XDG_STATE_HOME?.trim() || join(home, ".local", "state");
@@ -74,8 +84,8 @@ export interface ConfigParse {
 }
 
 /** Accepts unknown JSON; every invalid field stays at its default and warns. */
-export function parseConfig(raw: unknown): ConfigParse {
-	const config: LayaRoutingConfig = { ...DEFAULT_CONFIG };
+export function parseConfig(raw: unknown, defaults: LayaRoutingConfig = DEFAULT_CONFIG): ConfigParse {
+	const config: LayaRoutingConfig = { ...defaults };
 	const warnings: string[] = [];
 	if (raw === undefined) return { config, warnings };
 	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
@@ -133,7 +143,7 @@ export function loadConfig(path: string, env: Env = process.env): ConfigLoad {
 		if (code !== "ENOENT") error = cause instanceof Error ? cause.message : String(cause);
 	}
 
-	const parsed = parseConfig(exists ? raw : undefined);
+	const parsed = parseConfig(exists ? raw : undefined, { ...DEFAULT_CONFIG, python: defaultPythonPath(env) });
 	const warnings = [...parsed.warnings];
 	const envMode = env.LAYA_ROUTING_MODE?.trim();
 	if (isMode(envMode)) parsed.config.mode = envMode;

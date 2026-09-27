@@ -3,6 +3,5 @@
   "confidenceThreshold": 0.8,
   "timeoutMs": 20000,
   "advisoryBudgetMs": 800,
-  "shutdownGraceMs": 300000,
-  "python": "/home/okazakee/.local/share/pi-laya/venv/bin/python"
+  "shutdownGraceMs": 300000
 }
