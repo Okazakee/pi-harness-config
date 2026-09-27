@@ -3,10 +3,12 @@
  *
  * Top bar — a widget above the editor, always visible:
  *
- *   <pi> 24m · <spinner> 3m 07s      <folder> ~/proj <branch> main
+ *   <spinner> 3m 07s    <folder> ~/proj <branch> main     while a task runs
+ *   <pi> 24m            <folder> ~/proj <branch> main     idle
  *
- * The leading time is the accumulated agent-work time (the sum of every work
- * run), not wall-clock time since Pi opened.
+ * The timing segment shows a single value: the running task's timer while
+ * working, and the accumulated agent-work time (the sum of every work run,
+ * never idle wall time) when idle.
  *
  * Bottom bar — the custom footer, provider/model/context/cache on the left and
  * the usage windows on the right:
@@ -209,8 +211,7 @@ export default function statusline(pi: ExtensionAPI) {
 
 	// Task timer — rendered as the first element of the top bar.
 	let taskStart: number | undefined;
-	let lastElapsedMs: number | undefined;
-	// Sum of every completed work run; the running one is added while it lasts.
+	// Sum of every completed work run; the running one replaces it while it lasts.
 	let totalWorkMs = 0;
 	let spinnerFrame = 0;
 	let spinnerTimer: ReturnType<typeof setInterval> | undefined;
@@ -260,7 +261,6 @@ export default function statusline(pi: ExtensionAPI) {
 	pi.on("agent_start", () => {
 		if (taskStart === undefined) {
 			taskStart = Date.now();
-			lastElapsedMs = undefined;
 			spinnerFrame = 0;
 		}
 		startSpinner();
@@ -268,10 +268,7 @@ export default function statusline(pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_settled", () => {
-		if (taskStart !== undefined) {
-			lastElapsedMs = Date.now() - taskStart;
-			totalWorkMs += lastElapsedMs;
-		}
+		if (taskStart !== undefined) totalWorkMs += Date.now() - taskStart;
 		taskStart = undefined;
 		stopSpinner();
 		requestRender?.();
@@ -281,23 +278,20 @@ export default function statusline(pi: ExtensionAPI) {
 		if (ctx.mode !== "tui") return;
 
 		/**
-		 * Top bar: accumulated work time and the current/last task on the left;
-		 * project directory, cwd-switch override and branch on the right.
+		 * Top bar: the current run's timer while working, the accumulated work
+		 * time when idle, on the left; project directory, cwd-switch override and
+		 * branch on the right.
 		 */
 		const renderTopBar = (theme: Theme, width: number): string => {
 			const separator = theme.fg("dim", SEP);
 			const left: string[] = [];
-			left.push(theme.fg("dim", ICON_PI));
-			// Every completed work run plus the running one — never idle wall time.
-			const workMs = totalWorkMs + (taskStart !== undefined ? Date.now() - taskStart : 0);
-			left.push(theme.fg("text", formatDuration(workMs)));
 			if (taskStart !== undefined) {
+				// Working: one entity — the running task's timer.
 				const glyph = SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length];
 				left.push(`${theme.fg("accent", glyph)} ${theme.fg("text", formatDuration(Date.now() - taskStart))}`);
 			} else {
-				// Idle: keep the element visible — last task duration, or 0s before any task.
-				const glyph = lastElapsedMs !== undefined ? "✓" : "○";
-				left.push(`${theme.fg("dim", glyph)} ${theme.fg("dim", formatDuration(lastElapsedMs ?? 0))}`);
+				// Idle: one entity — every completed work run, never idle wall time.
+				left.push(`${theme.fg("dim", ICON_PI)} ${theme.fg("text", formatDuration(totalWorkMs))}`);
 			}
 
 			const right: string[] = [];

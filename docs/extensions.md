@@ -125,13 +125,15 @@ two-row statusline. The top bar is a widget above the editor and stays visible
 while the footer is replaced by the pinned rows below the editor:
 
 ```text
-<pi> 24m · <spinner> 3m 07s      <folder> ~/proj <branch> main
+<spinner> 3m 07s    <folder> ~/proj <branch> main     (working)
+<pi> 24m            <folder> ~/proj <branch> main     (idle)
 Command Code · DeepSeek V4.1 Flash · max · 2.4%/1M · CH87%    <bolt> 5h 0% (4h 51m) · 7d 5% (5d 14h) · mo 5% (25d)
 ```
 
-- Top bar, left: accumulated agent-work time — the sum of every work run, so
-  idle time while Pi sits open never counts — followed by the current task's
-  timer (spinner while working, `✓` after a task, `○` before the first one).
+- Top bar, left: one timing entity at a time — the spinner plus the current
+  run's timer while working, and the pi glyph plus the accumulated agent-work
+  time (the sum of every run, so idle time while Pi sits open never counts)
+  when idle.
 - Top bar, right: a folder glyph before the session directory, the `/cd`
   effective directory when active (same glyph, accent color), and a
   git-branch glyph before the branch.
