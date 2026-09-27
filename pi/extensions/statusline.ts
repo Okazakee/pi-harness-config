@@ -1,22 +1,42 @@
 /**
- * omp-style statusline for Pi.
+ * Two-row statusline for Pi.
  *
- * Replaces Pi's built-in footer with a single powerline-ish line:
+ * Top bar — a widget above the editor, always visible:
  *
- *   <pi> · DeepSeek V4.1 Flash · ~/proj · 2.4%/1M · <clock> · Command Code · 5h 0% (4h 51m) · 7d 5% (5d 14h)
+ *   <spinner> 3m 07s    <folder> ~/proj <branch> main     while a task runs
+ *   <pi> 24m            <folder> ~/proj <branch> main     idle
+ *
+ * The timing segment shows a single value: the running task's timer while
+ * working, and the accumulated agent-work time (the sum of every work run,
+ * never idle wall time) when idle.
+ *
+ * Bottom bar — the custom footer, provider/model/context/cache on the left and
+ * the usage windows on the right:
+ *
+ *   Command Code · DeepSeek V4.1 Flash · max · 2.4%/1M · CH87%    <bolt> 5h 0% (4h 51m) · 7d 5% (5d 14h) · mo 5% (25d)
+ *
+ * Pi's built-in working row is hidden: the top bar already shows the spinner
+ * next to the timings, so keeping both would print two spinners.
  *
  * Provider limit windows come from the active subscription provider's usage
  * endpoint — `GET <baseUrl>/v1/usage` for `opencode-go`, the pinned ChatGPT
  * `/wham/usage` route for `openai-codex`, the pinned Command Code
- * `/alpha/billing/credits` route for `commandcode` — with the credential Pi
- * already stores. Fetching is best-effort: on any failure (offline, 401,
- * missing subscription, another provider) the usage segment is hidden and the
- * last good snapshot is kept. Provider parsers and the request shape live in
- * `statusline/usage.ts`.
+ * `/alpha/billing/credits` route plus `/alpha/usage/summary` and
+ * `/alpha/billing/subscriptions` for the derived monthly window — with the
+ * credential Pi already stores. Fetching is best-effort: on any failure
+ * (offline, 401, missing subscription, another provider) the usage segment is
+ * hidden and the last good snapshot is kept. Provider parsers and the request
+ * shape live in `statusline/usage.ts`.
  */
 
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+	ReadonlyFooterDataProvider,
+	Theme,
+	ThemeColor,
+} from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 import {
@@ -35,6 +55,10 @@ import {
 // ── Tweakables ─────────────────────────────────────────────────────────────
 /** Leading glyph (nf-md). Matches the user's omp footer. */
 const ICON_PI = "\u{f0d57}";
+/** Folder glyph before a project directory. */
+const ICON_FOLDER = "\u{f024b}";
+/** Git branch glyph before the branch name. */
+const ICON_BRANCH = "\u{f062c}";
 /** Show the active thinking level next to the model name. */
 const SHOW_THINKING_LEVEL = true;
 /** How often provider usage is refetched. */
@@ -42,6 +66,8 @@ const USAGE_REFRESH_MS = 60_000;
 /** Task-timer spinner frames (braille) and frame interval. */
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_MS = 100;
+/** Horizontal padding, in terminal cells, on both statusline rows. */
+const PADDING_X = 2;
 
 // ── Usage plumbing ─────────────────────────────────────────────────────────
 
@@ -107,6 +133,14 @@ function formatCwd(cwd: string): string {
 }
 
 /**
+ * Command Code appends "(CC)" to every catalog model name; the provider is
+ * already named by the limits segment, so the footer drops the suffix.
+ */
+export function displayModelName(name: string): string {
+	return name.replace(/\s*\(CC\)$/, "");
+}
+
+/**
  * Cache hit rate of the latest assistant prompt: cacheRead / (input + cacheRead
  * + cacheWrite). Undefined until a response reports cache reads.
  */
@@ -138,6 +172,33 @@ function layoutFooter(left: string, right: string, width: number): string {
 	return truncateToWidth(truncatedLeft + gap + right, width, "");
 }
 
+/** Content width left inside the row padding. */
+function innerWidth(width: number): number {
+	return Math.max(0, width - PADDING_X * 2);
+}
+
+/** Frame one laid-out row with `PADDING_X` cells on both sides. */
+function padRow(line: string, width: number): string {
+	if (width <= PADDING_X * 2) return truncateToWidth(line, width, "");
+	const pad = " ".repeat(PADDING_X);
+	return pad + line + pad;
+}
+
+/**
+ * Top-bar layout: the timings on the left are never dropped. When space is
+ * tight, path segments are dropped from the right-hand side (so the branch
+ * outlives the full path) instead of blanking the timer.
+ */
+function layoutTopBar(left: string, rightSegments: string[], separator: string, width: number): string {
+	const minGap = 2;
+	const leftWidth = visibleWidth(left);
+	const availableRight = Math.max(0, width - leftWidth - minGap);
+	const segments = [...rightSegments];
+	while (segments.length > 1 && visibleWidth(segments.join(separator)) > availableRight) segments.shift();
+	const right = truncateToWidth(segments.join(separator), availableRight, "");
+	return layoutFooter(left, right, width);
+}
+
 // ── Extension ──────────────────────────────────────────────────────────────
 
 export default function statusline(pi: ExtensionAPI) {
@@ -145,10 +206,13 @@ export default function statusline(pi: ExtensionAPI) {
 	let usageProvider: string | undefined;
 	let fetching = false;
 	let requestRender: (() => void) | undefined;
+	// Stashed by the footer factory: the widget factory receives no footer data.
+	let footerDataRef: ReadonlyFooterDataProvider | undefined;
 
-	// Task timer — rendered as the first element of the bar.
+	// Task timer — rendered as the first element of the top bar.
 	let taskStart: number | undefined;
-	let lastElapsedMs: number | undefined;
+	// Sum of every completed work run; the running one replaces it while it lasts.
+	let totalWorkMs = 0;
 	let spinnerFrame = 0;
 	let spinnerTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -165,16 +229,6 @@ export default function statusline(pi: ExtensionAPI) {
 		if (!spinnerTimer) return;
 		clearInterval(spinnerTimer);
 		spinnerTimer = undefined;
-	};
-
-	const renderTimer = (theme: Theme): string => {
-		if (taskStart !== undefined) {
-			const glyph = SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length];
-			return `${theme.fg("accent", glyph)} ${theme.fg("text", formatDuration(Date.now() - taskStart))}`;
-		}
-		// Idle: keep the element visible — last task duration, or 0s before any task.
-		const glyph = lastElapsedMs !== undefined ? "✓" : "○";
-		return `${theme.fg("dim", glyph)} ${theme.fg("dim", formatDuration(lastElapsedMs ?? 0))}`;
 	};
 
 	async function refreshUsage(ctx: ExtensionContext): Promise<void> {
@@ -207,7 +261,6 @@ export default function statusline(pi: ExtensionAPI) {
 	pi.on("agent_start", () => {
 		if (taskStart === undefined) {
 			taskStart = Date.now();
-			lastElapsedMs = undefined;
 			spinnerFrame = 0;
 		}
 		startSpinner();
@@ -215,7 +268,7 @@ export default function statusline(pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_settled", () => {
-		if (taskStart !== undefined) lastElapsedMs = Date.now() - taskStart;
+		if (taskStart !== undefined) totalWorkMs += Date.now() - taskStart;
 		taskStart = undefined;
 		stopSpinner();
 		requestRender?.();
@@ -224,8 +277,41 @@ export default function statusline(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.mode !== "tui") return;
 
+		/**
+		 * Top bar: the current run's timer while working, the accumulated work
+		 * time when idle, on the left; project directory, cwd-switch override and
+		 * branch on the right.
+		 */
+		const renderTopBar = (theme: Theme, width: number): string => {
+			const separator = theme.fg("dim", SEP);
+			const left: string[] = [];
+			if (taskStart !== undefined) {
+				// Working: one entity — the running task's timer.
+				const glyph = SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length];
+				left.push(`${theme.fg("accent", glyph)} ${theme.fg("text", formatDuration(Date.now() - taskStart))}`);
+			} else {
+				// Idle: one entity — every completed work run, never idle wall time.
+				left.push(`${theme.fg("dim", ICON_PI)} ${theme.fg("text", formatDuration(totalWorkMs))}`);
+			}
+
+			const right: string[] = [];
+			right.push(`${theme.fg("dim", ICON_FOLDER)} ${theme.fg("text", formatCwd(ctx.cwd))}`);
+
+			// cwd-switch keeps an effective directory for tool calls while the
+			// session directory stays put; show it so the bar never implies that
+			// tools are running in the directory it displays first.
+			const effectiveCwd = footerDataRef?.getExtensionStatuses?.().get("cwd");
+			if (effectiveCwd) right.push(`${theme.fg("dim", ICON_FOLDER)} ${theme.fg("accent", effectiveCwd)}`);
+
+			const branch = footerDataRef?.getGitBranch();
+			if (branch && branch !== "detached") right.push(`${theme.fg("dim", ICON_BRANCH)} ${theme.fg("dim", branch)}`);
+
+			return layoutTopBar(left.join(separator), right, separator, width);
+		};
+
 		ctx.ui.setFooter((tui, theme, footerData) => {
 			requestRender = () => tui.requestRender();
+			footerDataRef = footerData;
 			void refreshUsage(ctx);
 			const timer = setInterval(() => void refreshUsage(ctx), USAGE_REFRESH_MS);
 			timer.unref?.();
@@ -237,6 +323,7 @@ export default function statusline(pi: ExtensionAPI) {
 					stopSpinner();
 					unsubscribeBranch();
 					requestRender = undefined;
+					footerDataRef = undefined;
 				},
 				invalidate() {},
 				render(width: number): string[] {
@@ -246,11 +333,14 @@ export default function statusline(pi: ExtensionAPI) {
 					const separator = theme.fg("dim", SEP);
 
 					const left: string[] = [];
-					left.push(renderTimer(theme));
-					left.push(theme.fg("dim", ICON_PI));
+					// Provider label first: the snapshot tier (the provider for Command
+					// Code/OpenCode Go, the plan for Codex) or the provider id when no
+					// usage endpoint applies.
+					const provider = usage?.tier ?? model?.provider;
+					if (provider) left.push(theme.fg("muted", provider));
 
 					if (model) {
-						let modelText = model.name || model.id;
+						let modelText = displayModelName(model.name || model.id);
 						if (SHOW_THINKING_LEVEL && model.reasoning) {
 							const level = pi.getThinkingLevel();
 							if (level && level !== "off") {
@@ -259,17 +349,6 @@ export default function statusline(pi: ExtensionAPI) {
 						}
 						left.push(theme.fg("accent", modelText));
 					}
-
-					left.push(theme.fg("text", formatCwd(ctx.cwd)));
-
-					// cwd-switch keeps an effective directory for tool calls while the
-					// session directory stays put; show it so the footer never implies
-					// that tools are running in the directory it displays first.
-					const effectiveCwd = footerData.getExtensionStatuses?.().get("cwd");
-					if (effectiveCwd) left.push(theme.fg("accent", effectiveCwd));
-
-					const branch = footerData.getGitBranch();
-					if (branch && branch !== "detached") left.push(theme.fg("dim", branch));
 
 					const contextUsage = ctx.getContextUsage();
 					const window = contextUsage?.contextWindow ?? model?.contextWindow ?? 0;
@@ -285,7 +364,21 @@ export default function statusline(pi: ExtensionAPI) {
 
 					const leftText = left.join(separator);
 					const rightText = usage ? (renderUsage(theme, usage) ?? "") : "";
-					return [layoutFooter(leftText, rightText, width)];
+					return [padRow(layoutFooter(leftText, rightText, innerWidth(width)), width)];
+				},
+			};
+		});
+
+		// The top bar already renders the working spinner; Pi's built-in working
+		// row would print a second one, so it is hidden for this session.
+		ctx.ui.setWorkingVisible(false);
+		ctx.ui.setWidget("statusline-top", (tui, theme) => {
+			requestRender = () => tui.requestRender();
+			return {
+				invalidate() {},
+				render(width: number): string[] {
+					if (width <= 0) return [""];
+					return [padRow(renderTopBar(theme, innerWidth(width)), width)];
 				},
 			};
 		});

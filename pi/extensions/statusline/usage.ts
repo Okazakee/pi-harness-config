@@ -1,8 +1,9 @@
 /**
- * Provider usage windows for the custom statusline footer.
+ * Provider usage windows for the custom statusline.
  *
- * Three subscription providers expose a usage endpoint that the footer
- * renders in one compact style (`tier · label X% (reset)`):
+ * Three subscription providers expose a usage endpoint that the statusline
+ * renders in one compact style per window (`label X% (reset)`); the snapshot's
+ * `tier` is rendered separately as the footer's provider label.
  *
  *   opencode-go    GET <base>/v1/usage
  *                  → rolling / weekly / monthly windows
@@ -10,6 +11,9 @@
  *                  → primary / secondary rate-limit windows
  *   commandcode    GET https://api.commandcode.ai/alpha/billing/credits
  *                  → fiveHour / weekly window limits (used/cap credits)
+ *                  GET /alpha/usage/summary (billing-period spend) and
+ *                  GET /alpha/billing/subscriptions (period end)
+ *                  → derived monthly window (spend over spend + remaining)
  *
  * Everything here is either pure or takes an injectable `fetch`, so the
  * parsers and the request shape stay unit-testable without Pi, network access
@@ -37,16 +41,20 @@ export const COMMANDCODE = "commandcode"
 /** Pinned Command Code origin; the bearer credential is never sent elsewhere. */
 export const COMMANDCODE_BASE = "https://api.commandcode.ai"
 export const COMMANDCODE_CREDITS_URL = `${COMMANDCODE_BASE}/alpha/billing/credits`
+/** Current billing period; its end is when the monthly credit pool renews. */
+export const COMMANDCODE_SUBSCRIPTIONS_URL = `${COMMANDCODE_BASE}/alpha/billing/subscriptions`
+/** Credit totals for the current billing period (the route defaults to it). */
+export const COMMANDCODE_USAGE_SUMMARY_URL = `${COMMANDCODE_BASE}/alpha/usage/summary`
 export const COMMANDCODE_TIER = "Command Code"
 
-/** Providers whose usage windows the footer can render. */
+/** Providers whose usage windows the statusline can render. */
 export const USAGE_PROVIDERS: readonly string[] = [OPENCODE_GO, OPENAI_CODEX, COMMANDCODE]
 
 export function isUsageProvider(provider: string | undefined): boolean {
 	return provider !== undefined && USAGE_PROVIDERS.includes(provider)
 }
 
-/** Separator between footer segments. */
+/** Separator between statusline segments. */
 export const SEP = " · "
 /** Glyph prefixed to the provider-usage segment. Matches the user's omp footer. */
 export const ICON_USAGE = "\u{f0068}"
@@ -314,8 +322,12 @@ export interface CommandCodeWindow {
 	status: string
 }
 
-/** Epoch seconds or milliseconds → ISO; unset (0) resets stay undefined. */
+/** Epoch seconds, epoch milliseconds or an ISO string → ISO; unset resets stay undefined. */
 export function commandCodeResetIso(value: unknown): string | undefined {
+	if (typeof value === "string") {
+		const parsed = Date.parse(value)
+		return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined
+	}
 	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined
 	const ms = value >= 1e12 ? value : value * 1000
 	const date = new Date(ms)
@@ -335,37 +347,109 @@ export function readCommandCodeWindow(payload: unknown): CommandCodeWindow | und
 	}
 }
 
-export function parseCommandCodeUsage(payload: unknown): UsageSnapshot | undefined {
+/** Extra payloads only the derived monthly window needs. */
+export interface CommandCodeMonthlySources {
+	/** `/alpha/usage/summary` payload; credits spent in the billing period. */
+	summary?: unknown
+	/** `/alpha/billing/subscriptions` payload; carries the period end. */
+	subscription?: unknown
+}
+
+function nonNegativeNumber(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+/**
+ * Monthly window derived from two payloads: the remaining monthly/purchased/
+ * free credit pool (`credits`) and the credits spent this billing period
+ * (`summary`). The cap is `spent + remaining` — the same "used of pool" shape
+ * the Command Code provider reports. The subscription only contributes the
+ * reset timestamp, so a failed subscription fetch still renders the window.
+ */
+export function readCommandCodeMonthlyWindow(
+	payload: unknown,
+	sources: CommandCodeMonthlySources = {},
+): CommandCodeWindow | undefined {
+	if (!isRecord(payload) || !isRecord(payload.credits) || !isRecord(sources.summary)) return undefined
+	const credits = payload.credits
+	const summary = sources.summary
+	const remaining =
+		(nonNegativeNumber(credits.monthlyCredits) ?? 0) +
+		(nonNegativeNumber(credits.purchasedCredits) ?? 0) +
+		(nonNegativeNumber(credits.freeCredits) ?? 0)
+	const spent =
+		nonNegativeNumber(summary.totalMonthlyCredits) ??
+		nonNegativeNumber(summary.totalCost) ??
+		nonNegativeNumber(summary.totalCredits)
+	if (spent === undefined) return undefined
+	const cap = spent + remaining
+	if (cap <= 0) return undefined
+	const subscription = isRecord(sources.subscription) && isRecord(sources.subscription.data) ? sources.subscription.data : undefined
+	return {
+		// Credit overage (spent > cap) reads as a fully consumed window.
+		percent: Math.min(100, (spent / cap) * 100),
+		resetsAt: subscription ? commandCodeResetIso(subscription.currentPeriodEnd) : undefined,
+		status: "ok",
+	}
+}
+
+export function parseCommandCodeUsage(
+	payload: unknown,
+	sources: CommandCodeMonthlySources = {},
+): UsageSnapshot | undefined {
 	if (!isRecord(payload) || !isRecord(payload.windowLimits)) return undefined
 	const limits = payload.windowLimits
 	const windows: UsageWindowEntry[] = []
-	const add = (label: string, raw: unknown, unit: "m" | "h") => {
+	const add = (label: string, raw: unknown, unit: "m" | "h", floor = false) => {
 		const window = readCommandCodeWindow(raw)
-		if (window) windows.push({ label, unit, floor: false, window })
+		if (window) windows.push({ label, unit, floor, window })
 	}
 	add("5h", limits.fiveHour, "m")
 	add("7d", limits.weekly, "h")
+	const monthly = readCommandCodeMonthlyWindow(payload, sources)
+	if (monthly) windows.push({ label: "mo", unit: "h", floor: true, window: monthly })
 	if (windows.length === 0) return undefined
 	return { tier: COMMANDCODE_TIER, windows, fetchedAt: Date.now() }
+}
+
+/** GET one pinned Command Code route; undefined when it is unavailable. */
+async function fetchCommandCodeJson(
+	route: string,
+	apiKey: string,
+	options: UsageFetchOptions,
+): Promise<unknown | undefined> {
+	const url = new URL(route)
+	// Defense in depth: the bearer credential only ever goes to the pinned
+	// origin, even if the URL constant is edited later.
+	if (url.origin !== COMMANDCODE_BASE || !url.pathname.startsWith("/alpha/")) return undefined
+	try {
+		const response = await fetchImplFor(options)(url, {
+			headers: { accept: "application/json", authorization: `Bearer ${apiKey}` },
+			signal: AbortSignal.timeout(timeoutFor(options)),
+			// Never forward the credential to a redirect destination.
+			redirect: "error",
+		})
+		if (!response.ok) return undefined
+		return await response.json()
+	} catch {
+		// Best-effort: a missing payload only drops the window it would refine.
+		return undefined
+	}
 }
 
 export async function fetchCommandCodeUsage(
 	apiKey: string,
 	options: UsageFetchOptions = {},
 ): Promise<UsageSnapshot | undefined> {
-	const url = new URL(COMMANDCODE_CREDITS_URL)
-	// Defense in depth: the bearer credential only ever goes to the pinned
-	// origin, even if the URL constant is edited later.
-	if (url.origin !== COMMANDCODE_BASE || !url.pathname.startsWith("/alpha/")) return undefined
-
-	const response = await fetchImplFor(options)(url, {
-		headers: { accept: "application/json", authorization: `Bearer ${apiKey}` },
-		signal: AbortSignal.timeout(timeoutFor(options)),
-		// Never forward the credential to a redirect destination.
-		redirect: "error",
-	})
-	if (!response.ok) return undefined
-	return parseCommandCodeUsage(await response.json())
+	// All three routes are fetched together and stay best-effort: credits carries
+	// the 5h/7d windows, the summary and subscription payloads only refine `mo`.
+	const [credits, summary, subscription] = await Promise.all([
+		fetchCommandCodeJson(COMMANDCODE_CREDITS_URL, apiKey, options),
+		fetchCommandCodeJson(COMMANDCODE_USAGE_SUMMARY_URL, apiKey, options),
+		fetchCommandCodeJson(COMMANDCODE_SUBSCRIPTIONS_URL, apiKey, options),
+	])
+	if (credits === undefined) return undefined
+	return parseCommandCodeUsage(credits, { summary, subscription })
 }
 
 // ── Formatting ─────────────────────────────────────────────────────────────
@@ -396,8 +480,9 @@ function pickUsageColor(percent: number): ThemeColor {
 }
 
 /**
- * Compact usage segment: one `label X% (reset)` group per window, identical
- * for both providers. Returns undefined when no window is renderable.
+ * Compact usage segment: one `label X% (reset)` group per window, preceded by
+ * the usage glyph. Returns undefined when no window is renderable. The
+ * provider label (`usage.tier`) is rendered separately, to the left of it.
  */
 export function renderUsage(theme: Theme, usage: UsageSnapshot): string | undefined {
 	if (usage.windows.length === 0) return undefined
@@ -409,6 +494,5 @@ export function renderUsage(theme: Theme, usage: UsageSnapshot): string | undefi
 		const resetText = reset ? theme.fg("muted", ` (${reset})`) : ""
 		return `${entry.label} ${percentText}${resetText}`
 	})
-	const head = usage.tier ? `${theme.fg("accent", usage.tier)}${separator}` : ""
-	return `${theme.fg("muted", ICON_USAGE)}${separator}${head}${parts.join(separator)}`
+	return `${theme.fg("muted", ICON_USAGE)}${separator}${parts.join(separator)}`
 }

@@ -46,12 +46,12 @@ While an override is active, tool inputs are rewritten:
 - `grep` / `find` / `ls` resolve `path`, or default their scope to it.
 - Absolute paths are never touched.
 
-The session directory itself does not change, so the footer would otherwise
+The session directory itself does not change, so the statusline would otherwise
 show the wrong directory. `statusline.ts` renders the effective directory as an
-extra segment whenever an override is active.
+extra segment in the top bar whenever an override is active.
 
 Limits worth knowing: tools registered by other extensions (lsp, subagent, mcp)
-are not rewritten, and the git branch in the footer still reflects the session
+are not rewritten, and the git branch in the top bar still reflects the session
 directory. Tests: `scripts/test-cwd-switch.sh`.
 
 ## Execution scoping (`/todo`)
@@ -118,11 +118,41 @@ DCP keeps `todo` results protected, so their model-facing text stays small.
 
 Tests: `scripts/test-todo.sh`.
 
-## Provider usage in the footer
+## Statusline layout
+
+[`pi/extensions/statusline.ts`](../pi/extensions/statusline.ts) builds a
+two-row statusline. The top bar is a widget above the editor and stays visible
+while the footer is replaced by the pinned rows below the editor:
+
+```text
+<spinner> 3m 07s    <folder> ~/proj <branch> main     (working)
+<pi> 24m            <folder> ~/proj <branch> main     (idle)
+Command Code · DeepSeek V4.1 Flash · max · 2.4%/1M · CH87%    <bolt> 5h 0% (4h 51m) · 7d 5% (5d 14h) · mo 5% (25d)
+```
+
+- Top bar, left: one timing entity at a time — the spinner plus the current
+  run's timer while working, and the pi glyph plus the accumulated agent-work
+  time (the sum of every run, so idle time while Pi sits open never counts)
+  when idle.
+- Top bar, right: a folder glyph before the session directory, the `/cd`
+  effective directory when active (same glyph, accent color), and a
+  git-branch glyph before the branch.
+- Footer, left: provider label (the usage snapshot's tier — the provider for
+  Command Code / OpenCode Go, the plan name for Codex — or the provider id when
+  no usage endpoint applies), model name, thinking level, context-window usage
+  and cache-hit rate. Command Code's `(CC)` catalog suffix is dropped because
+  the provider is already named.
+- Footer, right: the usage glyph followed by the active provider's windows.
+
+Pi's built-in working row is hidden; the top bar already shows the spinner next
+to the timings, so keeping both would render two spinners.
+
+## Provider usage in the statusline
 
 [`pi/extensions/statusline.ts`](../pi/extensions/statusline.ts) renders the
-active subscription provider's windows as a compact `tier · label X% (reset)`
-segment, right-aligned in the custom footer. The parsers and the request shape
+active subscription provider's windows as compact `label X% (reset)` groups
+with the usage glyph, right-aligned in the footer; the snapshot's tier is
+rendered to the left as the provider label. The parsers and the request shape
 live in [`pi/extensions/statusline/usage.ts`](../pi/extensions/statusline/usage.ts):
 
 - **OpenCode Go** (`opencode-go`) — `GET <baseUrl>/v1/usage`, rendering the
@@ -131,14 +161,20 @@ live in [`pi/extensions/statusline/usage.ts`](../pi/extensions/statusline/usage.
   `https://chatgpt.com/backend-api/wham/usage` route, rendering the primary and
   secondary rate-limit windows with labels derived from their reported length.
 - **Command Code** (`commandcode`) — the pinned
-  `https://api.commandcode.ai/alpha/billing/credits` route, rendering the
-  five-hour and weekly credit windows (`used`/`cap`) as `5h` / `7d`.
+  `https://api.commandcode.ai/alpha/billing/credits` route renders the
+  five-hour and weekly credit windows (`used`/`cap`) as `5h` / `7d`. The
+  monthly window is derived from two more pinned routes fetched in parallel:
+  `/alpha/usage/summary` (credits spent in the billing period) and
+  `/alpha/billing/subscriptions` (period end for the countdown). Its cap is
+  `spent + remaining monthly/purchased/free credits`, the same "used of pool"
+  shape the provider package reports, so it renders as `mo X% (reset)`.
 
 Fetches are best-effort and reuse the credential Pi already stores for the
-provider; on any failure the segment is hidden and the last good snapshot is
-kept. Each credential is only ever sent to its provider's pinned origin,
-redirects are refused, and the ChatGPT account id is read from the OAuth
-token's `chatgpt_account_id` claim. No credential is ever printed.
+provider; on any failure the affected window (or the whole segment) is hidden,
+the last good snapshot is kept, and a missing summary/renewal route only drops
+the derived monthly window. Each credential is only ever sent to its provider's
+pinned origin, redirects are refused, and the ChatGPT account id is read from
+the OAuth token's `chatgpt_account_id` claim. No credential is ever printed.
 
 Tests: `scripts/test-statusline.sh`.
 
