@@ -3,12 +3,13 @@
  *
  * Top bar — a widget above the editor, always visible:
  *
- *   <spinner> 3m 07s    <folder> ~/proj <branch> main     while a task runs
- *   <pi> 24m            <folder> ~/proj <branch> main     idle
+ *   <spinner> 3m 07s        <folder> ~/proj <branch> main   while working
+ *   <pi> 24m <history> 3m    <folder> ~/proj <branch> main   idle: total + last run
  *
- * The timing segment shows a single value: the running task's timer while
- * working, and the accumulated agent-work time (the sum of every work run,
- * never idle wall time) when idle.
+ * While a task runs the timing segment shows a single value (the running
+ * task's timer). When idle it shows the accumulated agent-work time (the sum
+ * of every work run, never idle wall time) followed by the last completed
+ * run's duration.
  *
  * Bottom bar — the custom footer, provider/model/context/cache on the left and
  * the usage windows on the right:
@@ -59,6 +60,8 @@ const ICON_PI = "\u{f0d57}";
 const ICON_FOLDER = "\u{f024b}";
 /** Git branch glyph before the branch name. */
 const ICON_BRANCH = "\u{f062c}";
+/** History glyph before the last completed run's duration. */
+const ICON_LAST = "\u{f02da}";
 /** Show the active thinking level next to the model name. */
 const SHOW_THINKING_LEVEL = true;
 /** How often provider usage is refetched. */
@@ -213,6 +216,8 @@ export default function statusline(pi: ExtensionAPI) {
 	let taskStart: number | undefined;
 	// Sum of every completed work run; the running one replaces it while it lasts.
 	let totalWorkMs = 0;
+	// Duration of the last completed work run, shown after the total when idle.
+	let lastRunMs: number | undefined;
 	let spinnerFrame = 0;
 	let spinnerTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -268,7 +273,10 @@ export default function statusline(pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_settled", () => {
-		if (taskStart !== undefined) totalWorkMs += Date.now() - taskStart;
+		if (taskStart !== undefined) {
+			lastRunMs = Date.now() - taskStart;
+			totalWorkMs += lastRunMs;
+		}
 		taskStart = undefined;
 		stopSpinner();
 		requestRender?.();
@@ -279,8 +287,8 @@ export default function statusline(pi: ExtensionAPI) {
 
 		/**
 		 * Top bar: the current run's timer while working, the accumulated work
-		 * time when idle, on the left; project directory, cwd-switch override and
-		 * branch on the right.
+		 * time plus the last run when idle, on the left; project directory,
+		 * cwd-switch override and branch on the right.
 		 */
 		const renderTopBar = (theme: Theme, width: number): string => {
 			const separator = theme.fg("dim", SEP);
@@ -290,8 +298,12 @@ export default function statusline(pi: ExtensionAPI) {
 				const glyph = SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length];
 				left.push(`${theme.fg("accent", glyph)} ${theme.fg("text", formatDuration(Date.now() - taskStart))}`);
 			} else {
-				// Idle: one entity — every completed work run, never idle wall time.
+				// Idle: every completed work run (never idle wall time), then the
+				// last completed run's duration.
 				left.push(`${theme.fg("dim", ICON_PI)} ${theme.fg("text", formatDuration(totalWorkMs))}`);
+				if (lastRunMs !== undefined) {
+					left.push(`${theme.fg("dim", ICON_LAST)} ${theme.fg("muted", formatDuration(lastRunMs))}`);
+				}
 			}
 
 			const right: string[] = [];
