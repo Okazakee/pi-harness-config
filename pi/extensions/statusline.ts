@@ -3,7 +3,10 @@
  *
  * Top bar — a widget above the editor, always visible:
  *
- *   <pi> 1h 42m · <spinner> 3m 07s          ~/proj (main)
+ *   <pi> 24m · <spinner> 3m 07s          ~/proj (main)
+ *
+ * The leading time is the accumulated agent-work time (the sum of every work
+ * run), not wall-clock time since Pi opened.
  *
  * Bottom bar — the custom footer, model/context/cache on the left and the
  * provider limits on the right:
@@ -59,10 +62,6 @@ const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", 
 const SPINNER_MS = 100;
 /** Horizontal padding, in terminal cells, on both statusline rows. */
 const PADDING_X = 2;
-/** Clock refresh so the total Pi time keeps ticking while idle. */
-const CLOCK_MS = 1_000;
-/** Wall-clock start of this Pi process: the "total pi time" counts from here. */
-const PI_STARTED_AT = Date.now() - process.uptime() * 1_000;
 
 // ── Usage plumbing ─────────────────────────────────────────────────────────
 
@@ -207,9 +206,10 @@ export default function statusline(pi: ExtensionAPI) {
 	// Task timer — rendered as the first element of the top bar.
 	let taskStart: number | undefined;
 	let lastElapsedMs: number | undefined;
+	// Sum of every completed work run; the running one is added while it lasts.
+	let totalWorkMs = 0;
 	let spinnerFrame = 0;
 	let spinnerTimer: ReturnType<typeof setInterval> | undefined;
-	let clockTimer: ReturnType<typeof setInterval> | undefined;
 
 	const startSpinner = () => {
 		if (spinnerTimer) return;
@@ -264,7 +264,10 @@ export default function statusline(pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_settled", () => {
-		if (taskStart !== undefined) lastElapsedMs = Date.now() - taskStart;
+		if (taskStart !== undefined) {
+			lastElapsedMs = Date.now() - taskStart;
+			totalWorkMs += lastElapsedMs;
+		}
 		taskStart = undefined;
 		stopSpinner();
 		requestRender?.();
@@ -274,14 +277,16 @@ export default function statusline(pi: ExtensionAPI) {
 		if (ctx.mode !== "tui") return;
 
 		/**
-		 * Top bar: total Pi time and the current/last task on the left; project
-		 * directory, cwd-switch override and branch on the right.
+		 * Top bar: accumulated work time and the current/last task on the left;
+		 * project directory, cwd-switch override and branch on the right.
 		 */
 		const renderTopBar = (theme: Theme, width: number): string => {
 			const separator = theme.fg("dim", SEP);
 			const left: string[] = [];
 			left.push(theme.fg("dim", ICON_PI));
-			left.push(theme.fg("text", formatDuration(Date.now() - PI_STARTED_AT)));
+			// Every completed work run plus the running one — never idle wall time.
+			const workMs = totalWorkMs + (taskStart !== undefined ? Date.now() - taskStart : 0);
+			left.push(theme.fg("text", formatDuration(workMs)));
 			if (taskStart !== undefined) {
 				const glyph = SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length];
 				left.push(`${theme.fg("accent", glyph)} ${theme.fg("text", formatDuration(Date.now() - taskStart))}`);
@@ -318,8 +323,6 @@ export default function statusline(pi: ExtensionAPI) {
 				dispose() {
 					clearInterval(timer);
 					stopSpinner();
-					if (clockTimer) clearInterval(clockTimer);
-					clockTimer = undefined;
 					unsubscribeBranch();
 					requestRender = undefined;
 					footerDataRef = undefined;
@@ -377,11 +380,6 @@ export default function statusline(pi: ExtensionAPI) {
 				},
 			};
 		});
-
-		// Keep the total Pi time ticking while idle; the 100ms spinner timer only
-		// runs while a task is active.
-		clockTimer = setInterval(() => requestRender?.(), CLOCK_MS);
-		clockTimer.unref?.();
 	});
 
 	pi.on("model_select", (_event, ctx) => {
