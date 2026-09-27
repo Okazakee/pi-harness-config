@@ -57,6 +57,8 @@ const USAGE_REFRESH_MS = 60_000;
 /** Task-timer spinner frames (braille) and frame interval. */
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_MS = 100;
+/** Horizontal padding, in terminal cells, on both statusline rows. */
+const PADDING_X = 2;
 /** Clock refresh so the total Pi time keeps ticking while idle. */
 const CLOCK_MS = 1_000;
 /** Wall-clock start of this Pi process: the "total pi time" counts from here. */
@@ -163,6 +165,18 @@ function layoutFooter(left: string, right: string, width: number): string {
 	const truncatedLeft = truncateToWidth(left, availableLeft, "");
 	const gap = " ".repeat(Math.max(1, width - visibleWidth(truncatedLeft) - rightWidth));
 	return truncateToWidth(truncatedLeft + gap + right, width, "");
+}
+
+/** Content width left inside the row padding. */
+function innerWidth(width: number): number {
+	return Math.max(0, width - PADDING_X * 2);
+}
+
+/** Frame one laid-out row with `PADDING_X` cells on both sides. */
+function padRow(line: string, width: number): string {
+	if (width <= PADDING_X * 2) return truncateToWidth(line, width, "");
+	const pad = " ".repeat(PADDING_X);
+	return pad + line + pad;
 }
 
 /**
@@ -345,7 +359,7 @@ export default function statusline(pi: ExtensionAPI) {
 					// Fall back to the bare provider id when no usage segment renders, so
 					// the right side always names the model's provider.
 					const rightText = (usage ? (renderUsage(theme, usage) ?? "") : "") || (model ? theme.fg("muted", model.provider) : "");
-					return [layoutFooter(leftText, rightText, width)];
+					return [padRow(layoutFooter(leftText, rightText, innerWidth(width)), width)];
 				},
 			};
 		});
@@ -359,7 +373,7 @@ export default function statusline(pi: ExtensionAPI) {
 				invalidate() {},
 				render(width: number): string[] {
 					if (width <= 0) return [""];
-					return [renderTopBar(theme, width)];
+					return [padRow(renderTopBar(theme, innerWidth(width)), width)];
 				},
 			};
 		});
