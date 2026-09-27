@@ -180,6 +180,71 @@ the OAuth token's `chatgpt_account_id` claim. No credential is ever printed.
 
 Tests: `scripts/test-statusline.sh`.
 
+## Laya routing advisor (`/laya-routing`)
+
+[`pi/extensions/laya-routing.ts`](../pi/extensions/laya-routing.ts) adds a
+small advisory classifier for discretionary specialist delegation in root
+sessions. Laya is not an agent: it makes one typed decision per user turn —
+would auxiliary context help, and of what kind — and Pi stays free to ignore
+it.
+
+```text
+user prompt
+    |
+    +--> deterministic bypass?  (explicit delegation / no-delegation /
+    |                            delegated session / off mode / unusable input)
+    |
+    +--> Laya classifies the raw bounded prompt
+             |
+             v
+       confidence gate (answer_confidence)
+             |
+             v
+   request-local <delegation_hint> in advise mode
+             |
+             v
+   the model decides: explore / research / architect / nobody
+```
+
+- **Modes** (`pi/laya-routing.json`, `off` / `shadow` / `advise`, default
+  `shadow`): `off` performs no classification and writes no telemetry;
+  `shadow` classifies and records telemetry without injecting anything;
+  `advise` injects the hint when `answer_confidence` clears the gate.
+  `/laya-routing status` shows the effective mode and diagnostics,
+  `/laya-routing mode <x>` writes the config file.
+- **Semantics stay abstract from agent names.** The classifier answers a
+  `purpose` enum (`none`, `local_context`, `external_context`, `architecture`)
+  and the deterministic mapping lives in code: `local_context -> explore`,
+  `external_context -> research`, `architecture -> architect`, `none -> no
+  recommendation`.
+- **Request-local only.** The hint is a `role: "custom"`, `display: false`
+  message appended in the `context` event — the same mechanism as the todo
+  nudge — so it is never written back to the session transcript. Explicit user
+  intent always wins, and a hint can never trigger delegation by itself.
+- **Fail-open.** A missing runtime or model, timeout, malformed payload,
+  invalid enum or unexpected exception simply produces no hint; the reason is
+  recorded in telemetry.
+- **Runtime and pin.**
+  [`pi/extensions/laya-routing/bridge.py`](../pi/extensions/laya-routing/bridge.py)
+  runs one `python3` process per decision and pins the package version and the
+  model revision in
+  [`pi/extensions/laya-routing/laya.lock.json`](../pi/extensions/laya-routing/laya.lock.json)
+  (`laya[structured]==0.3.20`, `convaiinnovations/laya@55cf4c4e`). Laya is
+  optional: without it the extension stays in fail-open mode. Weights stay in
+  the huggingface cache and are never copied into the repository. The
+  per-decision process is deliberate v1 — no daemon, socket, lease or warm
+  runtime exists until the telemetry shows startup cost is a problem.
+- **Shadow telemetry.** One JSONL event per root turn under
+  `$XDG_STATE_HOME/pi/laya-routing/decisions.jsonl` (default
+  `~/.local/state/pi/laya-routing/decisions.jsonl`) — outside the agent dir
+  and the backup repository. It records mode, classifier output and latency,
+  bypass/failure reasons, and whether a `subagent` tool call was observed in
+  the same agent run. It never records prompts, summaries, file names, tool
+  payloads, source or environment values. `changed_course` is not measured:
+  Pi exposes no reliable signal for it.
+
+Tests: `scripts/test-laya-routing.sh`.
+
 ## Agent-dir secret loading (`secret-loader`)
 
 [`pi/extensions/secret-loader.ts`](../pi/extensions/secret-loader.ts) bridges the

@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "python_package": {
+    "name": "laya",
+    "version": "0.3.20",
+    "install": "python3 -m pip install 'laya[structured]==0.3.20'",
+    "wheel_sha256": "6039e802fa5effb8dd492061cd7ad39a43087beadc4a4fa4a649614e77eb83d4"
+  },
+  "model": {
+    "repo": "convaiinnovations/laya",
+    "revision": "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851",
+    "file": "model.safetensors",
+    "sha256": "891102d372688fc2a094dac56a384bc537b87c63f21f9f3dac0be2b7cbc8d86c",
+    "size_bytes": 842609210
+  },
+  "notes": [
+    "English base checkpoint (ModernBERT-large, 421M, ctx 512); the same HF repo carries multilingual/ and typed-decisions/ subfolders that this pin does not use.",
+    "Laya is an optional runtime dependency: without it, or with a version that does not match the pin, the extension fails open and records the failure reason.",
+    "The revision pins the huggingface_hub download; weights are cached by huggingface_hub and are never copied into this repository.",
+    "Values were recorded from the PyPI 0.3.20 release and the HF API revision endpoint; update them deliberately with the model, not by floating to main."
+  ]
+}

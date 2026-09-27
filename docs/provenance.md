@@ -9,11 +9,12 @@ not listed here are intentionally excluded.
 | `pi/settings.json` | `~/.pi/agent/settings.json` |
 | `pi/dcp.jsonc` | `~/.pi/agent/dcp.jsonc` |
 | `pi/pi-lsp.json` | `~/.pi/agent/pi-lsp.json` |
+| `pi/laya-routing.json` | `~/.pi/agent/laya-routing.json` |
 | `pi/keybindings.json` | `~/.pi/agent/keybindings.json` |
 | `pi/patch-pi-renderer.py` | `~/.pi/agent/patch-pi-renderer.py` |
 | `pi/logo.png` | `~/.pi/agent/logo.png` |
 | `pi/agents/` | `~/.pi/agent/agents/` (`*.md`) |
-| `pi/extensions/` | `~/.pi/agent/extensions/` (recursive; `todo.ts` plus the `todo/` helper modules) |
+| `pi/extensions/` | `~/.pi/agent/extensions/` (recursive; `todo.ts` plus the `todo/` helper modules, and the `laya-routing` bridge/lock) |
 | `pi/themes/` | `~/.pi/agent/themes/` (`*.json`) |
 | `pi/skills/` | `~/.pi/agent/skills/` (recursive) |
 | `mcp/mcp.json` | `~/.config/mcp/mcp.json` |

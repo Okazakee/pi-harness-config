@@ -73,3 +73,15 @@ all four supported assets to expose SHA-256 digest metadata, refuses draft or
 prerelease builds unless `--include-prerelease` is passed, and fails on a
 missing asset or an ambiguous duplicate. The resulting lock diff is a normal
 repository change: review it and commit it deliberately.
+
+### Laya delegation advisor (optional)
+
+The advisory classifier's Python runtime is pinned in
+[`pi/extensions/laya-routing/laya.lock.json`](../pi/extensions/laya-routing/laya.lock.json)
+(`laya[structured]==0.3.20` wheel digest, `convaiinnovations/laya` at a fixed
+revision with the `model.safetensors` digest and size). Unlike Obscura, Laya is
+optional: `restore.sh` does not install it and the extension fails open —
+recording the failure reason — whenever the package or its pinned version is
+missing. Install it with the command recorded in the lock if the shadow
+experiment justifies it; weights stay in the huggingface cache and are never
+backed up.
