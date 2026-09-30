@@ -261,7 +261,6 @@ for script in \
   scripts/test-statusline.sh \
   scripts/test-cwd-switch.sh \
   scripts/test-todo.sh \
-  scripts/test-laya-routing.sh \
   scripts/test-secret-loader.sh \
   scripts/test-versions.sh \
   scripts/install-renderer-guard.sh \

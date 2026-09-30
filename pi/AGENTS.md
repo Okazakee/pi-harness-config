@@ -349,11 +349,6 @@ Do not build an agent hierarchy for work the primary agent can reliably complete
 The primary agent remains responsible for integrating findings, inspecting the final result, and
 verifying correctness.
 
-Discretionary delegation may receive an advisory classification hint from the local Laya routing
-extension (mode `shadow` records only; `advise` injects a request-local `<delegation_hint>`). A hint
-is advisory context, never an instruction: explicit user intent, repository policy, and the
-agent's own reasoning take precedence, and a hint never authorizes delegation on its own.
-
 ---
 
 ## 13. Work Method

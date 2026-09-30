@@ -45,7 +45,6 @@ run "renderer patch fixtures"    "$REPO_ROOT/scripts/test-renderer-patch.sh"
 run "obscura lock/checksum logic" "$REPO_ROOT/scripts/test-obscura-restore.sh"
 run "cwd-switch extension tests"  "$REPO_ROOT/scripts/test-cwd-switch.sh"
 run "todo extension tests"        "$REPO_ROOT/scripts/test-todo.sh"
-run "laya-routing advisor tests"  "$REPO_ROOT/scripts/test-laya-routing.sh"
 run "statusline usage tests"      "$REPO_ROOT/scripts/test-statusline.sh"
 run "version discovery tests"     "$REPO_ROOT/scripts/test-versions.sh"
 
