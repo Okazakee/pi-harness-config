@@ -349,11 +349,6 @@ Do not build an agent hierarchy for work the primary agent can reliably complete
 The primary agent remains responsible for integrating findings, inspecting the final result, and
 verifying correctness.
 
-Discretionary delegation may receive an advisory classification hint from the local Laya routing
-extension (mode `shadow` records only; `advise` injects a request-local `<delegation_hint>`). A hint
-is advisory context, never an instruction: explicit user intent, repository policy, and the
-agent's own reasoning take precedence, and a hint never authorizes delegation on its own.
-
 ---
 
 ## 13. Work Method
@@ -452,7 +447,7 @@ Never optimize context or token usage at the expense of correctness or evidence.
 `~/.pi/agent/extensions/rtk.ts` (installed by `rtk init -g --agent pi`). It hooks
 `tool_call`, runs `rtk rewrite` on every bash command, and silently mutates the
 command when an equivalent exists. It fails open and disables itself if `rtk` is
-missing or older than 0.23.0. Installed version: 0.49.0.
+missing or older than 0.23.0. Installed version: 0.50.0.
 
 Consequences to expect:
 

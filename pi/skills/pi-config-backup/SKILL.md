@@ -69,7 +69,8 @@ Override the repo location with `PI_BACKUP_REPO`, and the agent dir with
 ## What is backed up (allowlist)
 
 - `~/.pi/agent`: `AGENTS.md`, `settings.json`, `dcp.jsonc`,
-  `keybindings.json`, `patch-pi-renderer.py`, `logo.png`, `pi-lsp.json`
+  `keybindings.json`, `patch-pi-renderer.py`, `logo.png`, `pi-lsp.json`,
+  `mcp-adapter.json`
 - `~/.pi/agent/agents/`, `extensions/`, `themes/`, `skills/` (recursive)
 - `~/.config/mcp/mcp.json`
 - `~/.agents/skills/` (shared skills Pi loads globally)
@@ -78,8 +79,8 @@ Absence is mirrored: an optional source removed from live is removed from the
 snapshot too, so a restore cannot resurrect it. Required sources must exist —
 `settings.json`, `extensions/`, `patch-pi-renderer.py` and `skills/` — and
 abort the backup before any copy when missing. Optional sources: `AGENTS.md`,
-`keybindings.json`, `logo.png`, `dcp.jsonc`, `pi-lsp.json`, `agents/`,
-`themes/`, `mcp/mcp.json` and `shared-skills/`.
+`keybindings.json`, `logo.png`, `dcp.jsonc`, `pi-lsp.json`, `mcp-adapter.json`,
+`agents/`, `themes/`, `mcp/mcp.json` and `shared-skills/`.
 
 ## Never backed up
 

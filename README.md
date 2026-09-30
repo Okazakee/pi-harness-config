@@ -7,7 +7,7 @@ the parts needed to rebuild the harness on a fresh machine. This is
 This repository is the canonical versioned snapshot of the Pi harness now
 that the former `omp-harness-config` repo is retired.
 
-- Pi version at backup time: **0.87.1**
+- Pi version at backup time: **0.99.2**
 - Full source-path mapping: [`docs/provenance.md`](docs/provenance.md)
 
 ## Purpose
@@ -79,7 +79,6 @@ scripts/test-obscura-restore.sh    # Obscura lock + checksum logic
 scripts/test-cwd-switch.sh         # /cd extension unit + wiring tests
 scripts/test-statusline.sh         # provider-usage parsers + statusline rendering
 scripts/test-todo.sh               # /todo extension unit + wiring tests
-scripts/test-laya-routing.sh       # Laya delegation-advisor unit + wiring tests
 scripts/test-secret-loader.sh       # agent-dir secret loader tests
 scripts/test-versions.sh           # version drift and preflight logic
 ```

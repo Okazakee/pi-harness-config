@@ -261,7 +261,6 @@ for script in \
   scripts/test-statusline.sh \
   scripts/test-cwd-switch.sh \
   scripts/test-todo.sh \
-  scripts/test-laya-routing.sh \
   scripts/test-secret-loader.sh \
   scripts/test-versions.sh \
   scripts/install-renderer-guard.sh \
@@ -343,10 +342,10 @@ else
   fi
 fi
 
-for json in pi/settings.json pi/pi-lsp.json mcp/mcp.json deps/obscura.lock.json deps/tools.lock.json; do
+for json in pi/settings.json pi/pi-lsp.json pi/mcp-adapter.json mcp/mcp.json deps/obscura.lock.json deps/tools.lock.json; do
   if [ ! -f "$json" ]; then
     case "$json" in
-      pi/pi-lsp.json|mcp/mcp.json) continue ;; # optional config: absence is a valid state
+      pi/pi-lsp.json|pi/mcp-adapter.json|mcp/mcp.json) continue ;; # optional config: absence is a valid state
       *) fail "expected JSON file is missing: $json" ;;
     esac
   fi

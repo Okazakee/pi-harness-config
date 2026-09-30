@@ -1,9 +1,10 @@
 // cwd-switch — an effective (virtual) working directory for Pi.
 //
 // Pi fixes the session working directory at process start and exposes no
-// setter for it (verified against 0.87.1: `ctx.cwd` is read-only, and the only
-// cwd override in the API is `SessionManager.open(..., cwdOverride?)` at open
-// time). A `!cd …` in the shell cannot persist either, because every bash
+// setter for it (re-verified against 0.99.2: the extension context exposes no
+// cwd setter, and the only cwd override in the API is
+// `SessionManager.open(..., cwdOverride?)` at open time). A `!cd …` in the
+// shell cannot persist either, because every bash
 // command runs in its own `bash -c` process.
 //
 // So this extension keeps an *effective* directory alongside the session one:

@@ -3,9 +3,11 @@
 ## TUI renderer patch
 
 Pi's bundled renderer hardcodes a literal fence line above and below every code
-block and scrolls one line per mouse-wheel event (kitty's system default is 5).
-[`pi/patch-pi-renderer.py`](../pi/patch-pi-renderer.py) removes the fence lines
-and raises the wheel scroll to 5 lines. It locates the bundle chunk and the
+block. [`pi/patch-pi-renderer.py`](../pi/patch-pi-renderer.py) removes the fence
+lines. Mouse-wheel scrolling is configured through Pi's native
+`fullscreenWheelScrollLines` setting instead of a bundle edit: `settings.json`
+pins it to `5` lines per event (Pi 0.99+; earlier releases needed the bundle
+patch that this script used to carry). It locates the bundle chunk and the
 `pi-tui` markdown module **by signature** — Pi renames hashed chunk files on
 every release — is idempotent, and fails loudly when a pattern is unprovable
 instead of silently skipping.
@@ -66,7 +68,6 @@ scripts/test-obscura-restore.sh    # Obscura lock + checksum logic
 scripts/test-cwd-switch.sh         # /cd extension unit + wiring tests
 scripts/test-statusline.sh         # provider-usage parsers + statusline rendering
 scripts/test-todo.sh               # /todo extension unit + wiring tests
-scripts/test-laya-routing.sh       # Laya delegation-advisor unit + wiring tests
 scripts/test-secret-loader.sh       # agent-dir secret loader tests
 scripts/test-versions.sh           # version drift and preflight logic
 ```

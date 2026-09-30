@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Re-apply Pi TUI renderer patches after a Pi update.
 
-Pi's bundled Markdown renderer hardcodes:
-  * a literal "```" fence line above and below every code block
-  * 1 line per mouse-wheel event (kitty's default multiplier is 5)
+Pi's bundled Markdown renderer hardcodes a literal "```" fence line above and
+below every code block. This script removes those fence lines.
 
-This script removes the fence lines and raises the wheel scroll amount.
+Mouse-wheel scrolling is not patched here: Pi 0.99 and later expose the native
+`fullscreenWheelScrollLines` setting, which `settings.json` pins to 5.
 
 Contract (this is the point of the script):
   * every required target must exist, otherwise the run FAILS
@@ -71,12 +71,6 @@ BUNDLE_PATCHES = [
         ),
         new='nextTokenType&&nextTokenType!=="space"&&lines.push("");break}case"list":{',
         anchor='nextTokenType&&nextTokenType!=="space"&&lines.push("");break}case"list":{',
-    ),
-    Patch(
-        name="bundle-wheel-scroll",
-        old="this.wheelScrollLines=Math.max(1,Math.floor(options.wheelScrollLines??1))",
-        new="this.wheelScrollLines=Math.max(1,Math.floor(options.wheelScrollLines??5))",
-        anchor="this.wheelScrollLines=Math.max(1,Math.floor(options.wheelScrollLines",
     ),
 ]
 

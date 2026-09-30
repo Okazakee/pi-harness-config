@@ -73,27 +73,3 @@ all four supported assets to expose SHA-256 digest metadata, refuses draft or
 prerelease builds unless `--include-prerelease` is passed, and fails on a
 missing asset or an ambiguous duplicate. The resulting lock diff is a normal
 repository change: review it and commit it deliberately.
-
-### Laya delegation advisor (optional)
-
-The advisory classifier's Python runtime is pinned in
-[`pi/extensions/laya-routing/laya.lock.json`](../pi/extensions/laya-routing/laya.lock.json)
-(`laya==0.3.20`, `convaiinnovations/laya` at a fixed revision, per-checkpoint
-`model.safetensors` digests). Enforcement is real but split:
-
-- the model revision is enforced by the daemon's pinned
-  `huggingface_hub.snapshot_download(revision=...)`;
-- each checkpoint digest is enforced before load (sha256 of
-  `model.safetensors`, mismatch degrades the daemon instead of serving);
-- the installed `laya` version must equal the pin;
-- the wheel digest is informational — pip resolves the pinned version from
-  PyPI without hash mode, because hash-locking the full torch graph is out of
-  scope for this repository.
-
-Unlike Obscura, Laya is optional: `restore.sh` does not install it and the
-agent fails open — recording the failure reason — whenever the package or a
-checkpoint is missing. The shared warm daemon keeps both checkpoints resident
-while Pi is in use and frees them after the last client plus the shutdown
-grace; install the environment by hand from the command recorded in the lock
-when the shadow experiment justifies it. Weights stay in the huggingface
-cache and are never backed up.

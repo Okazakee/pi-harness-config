@@ -65,6 +65,7 @@ printf '#!/usr/bin/env python3\nprint("fixture")\n' >"$AGENT/patch-pi-renderer.p
 printf '\x89PNG\r\n\x1a\n fixture-logo' >"$AGENT/logo.png"
 printf '{\n  // declarative DCP policy\n  "enabled": true,\n  "keepRecent": 3\n}\n' >"$AGENT/dcp.jsonc"
 printf '{\n  "biome": {\n    "command": ["biome", "lsp-proxy"],\n    "extensions": [".ts"]\n  }\n}\n' >"$AGENT/pi-lsp.json"
+printf '{\n  "settings": {\n    "scriptMode": true\n  }\n}\n' >"$AGENT/mcp-adapter.json"
 printf 'agent fixture\n' >"$AGENT/agents/reviewer.md"
 printf 'export default 1\n' >"$AGENT/extensions/fixture.ts"
 printf 'export const helperFixture = 1\n' >"$AGENT/extensions/todo/helper.ts"
@@ -278,7 +279,7 @@ cp "$WORK/repo-readme.bak" "$REPO/README.md"
 cp "$WORK/repo-settings.bak" "$REPO/pi/settings.json"
 
 # ---------------------------------------------------------------- 2. allowlisted round-trip
-for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc pi-lsp.json; do
+for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc pi-lsp.json mcp-adapter.json; do
   if cmp -s "$AGENT/$f" "$REPO/pi/$f"; then
     pass "backup: pi/$f copied"
   else
