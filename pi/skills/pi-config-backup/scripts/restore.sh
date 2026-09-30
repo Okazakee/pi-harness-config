@@ -113,7 +113,7 @@ backup_needed=0
 if [ "$backup_needed" = 1 ]; then
   backup="$AGENT_DIR/backups/restore-$(date +%Y%m%d-%H%M%S)"
   must_mkdir "$backup"
-  for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc pi-lsp.json; do
+  for f in AGENTS.md settings.json keybindings.json patch-pi-renderer.py logo.png dcp.jsonc pi-lsp.json mcp-adapter.json; do
     [ -f "$AGENT_DIR/$f" ] && must_cp -a "$AGENT_DIR/$f" "$backup/"
   done
   for d in agents extensions themes skills; do
@@ -143,7 +143,7 @@ for f in settings.json patch-pi-renderer.py; do
   must_cp -f "$REPO_DIR/pi/$f" "$AGENT_DIR/$f"
   log "restored $f"
 done
-for f in AGENTS.md keybindings.json logo.png dcp.jsonc pi-lsp.json; do
+for f in AGENTS.md keybindings.json logo.png dcp.jsonc pi-lsp.json mcp-adapter.json; do
   if [ -f "$REPO_DIR/pi/$f" ]; then
     must_cp -f "$REPO_DIR/pi/$f" "$AGENT_DIR/$f"
     log "restored $f"

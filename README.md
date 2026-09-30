@@ -7,7 +7,7 @@ the parts needed to rebuild the harness on a fresh machine. This is
 This repository is the canonical versioned snapshot of the Pi harness now
 that the former `omp-harness-config` repo is retired.
 
-- Pi version at backup time: **0.87.1**
+- Pi version at backup time: **0.99.2**
 - Full source-path mapping: [`docs/provenance.md`](docs/provenance.md)
 
 ## Purpose

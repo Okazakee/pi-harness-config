@@ -447,7 +447,7 @@ Never optimize context or token usage at the expense of correctness or evidence.
 `~/.pi/agent/extensions/rtk.ts` (installed by `rtk init -g --agent pi`). It hooks
 `tool_call`, runs `rtk rewrite` on every bash command, and silently mutates the
 command when an equivalent exists. It fails open and disables itself if `rtk` is
-missing or older than 0.23.0. Installed version: 0.49.0.
+missing or older than 0.23.0. Installed version: 0.50.0.
 
 Consequences to expect:
 

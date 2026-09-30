@@ -74,7 +74,7 @@ fi
 # identical to live) is allowed. --overwrite-repo-edits bypasses it.
 repo_mirror_live_path() { # <repo-relative-path> -> live path, or return 1
   case "$1" in
-    pi/AGENTS.md|pi/settings.json|pi/keybindings.json|pi/patch-pi-renderer.py|pi/logo.png|pi/dcp.jsonc|pi/pi-lsp.json|pi/agents/*|pi/extensions/*|pi/themes/*|pi/skills/*)
+    pi/AGENTS.md|pi/settings.json|pi/keybindings.json|pi/patch-pi-renderer.py|pi/logo.png|pi/dcp.jsonc|pi/pi-lsp.json|pi/mcp-adapter.json|pi/agents/*|pi/extensions/*|pi/themes/*|pi/skills/*)
       printf '%s' "$AGENT_DIR/${1#pi/}" ;;
     mcp/mcp.json)
       printf '%s' "$MCP_SRC" ;;
@@ -111,7 +111,7 @@ same_mirror_state() { # <repo-path> <live-path>
 
 if [ "$ALLOW_OVERWRITE_REPO_EDITS" != 1 ] && git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   MIRRORED_PATHS=(pi/AGENTS.md pi/settings.json pi/keybindings.json pi/patch-pi-renderer.py \
-    pi/logo.png pi/dcp.jsonc pi/pi-lsp.json pi/agents pi/extensions pi/themes pi/skills \
+    pi/logo.png pi/dcp.jsonc pi/pi-lsp.json pi/mcp-adapter.json pi/agents pi/extensions pi/themes pi/skills \
     mcp/mcp.json shared-skills)
   repo_conflicts=()
   while IFS= read -r -d '' rel; do
@@ -182,7 +182,7 @@ cp -f "$AGENT_DIR/settings.json" "$REPO_DIR/pi/settings.json"
 log "copied pi/settings.json"
 cp -f "$AGENT_DIR/patch-pi-renderer.py" "$REPO_DIR/pi/patch-pi-renderer.py"
 log "copied pi/patch-pi-renderer.py"
-for f in AGENTS.md keybindings.json logo.png dcp.jsonc pi-lsp.json; do
+for f in AGENTS.md keybindings.json logo.png dcp.jsonc pi-lsp.json mcp-adapter.json; do
   if [ -f "$AGENT_DIR/$f" ]; then
     cp -f "$AGENT_DIR/$f" "$REPO_DIR/pi/$f"
     log "copied pi/$f"

@@ -3,7 +3,8 @@
 ## What is backed up (allowlist)
 
 `~/.pi/agent`: `AGENTS.md`, `settings.json`, `dcp.jsonc`,
-`keybindings.json`, `patch-pi-renderer.py`, `logo.png`, `pi-lsp.json`, and the
+`keybindings.json`, `patch-pi-renderer.py`, `logo.png`, `pi-lsp.json`,
+`mcp-adapter.json`, and the
 `agents/`, `extensions/`, `themes/`, `skills/` directories. Plus
 `~/.config/mcp/mcp.json` and `~/.agents/skills/`.
 
@@ -16,7 +17,8 @@ sources abort the backup before any copy when they are missing.
 - **Required:** `settings.json`, `extensions/`, `patch-pi-renderer.py`,
   `skills/`. The repository contract and its test suites depend on these.
 - **Optional:** `AGENTS.md`, `keybindings.json`, `logo.png`, `dcp.jsonc`,
-  `pi-lsp.json`, `agents/`, `themes/`, `mcp/mcp.json`, `shared-skills/`.
+  `pi-lsp.json`, `mcp-adapter.json`, `agents/`, `themes/`, `mcp/mcp.json`,
+  `shared-skills/`.
 
 ## What is never backed up
 
